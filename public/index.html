@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>agentcast — share your coding agent session live</title>
+<meta property="og:title" content="agentcast — watch a coding agent work, live from a link" />
+<meta property="og:description" content="Stream your Claude Code session to a shareable page: prompts, replies, tool calls, diffs and results as they happen. Replay when it ends." />
+<meta property="og:image" content="https://agentcast.agentcast.workers.dev/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="stylesheet" href="/viewer.css" />
+<style>
+  .hero { max-width: 760px; margin: 0 auto; padding: 72px 20px 40px; }
+  .hero h1 { font-size: 40px; line-height: 1.1; letter-spacing: -.02em; margin: 0 0 14px; white-space: normal; }
+  .hero p { color: var(--muted); font-size: 17px; margin: 0 0 28px; }
+  .steps { display: grid; gap: 12px; }
+  .step { border: 1px solid var(--border); border-radius: 12px; background: var(--panel); padding: 14px 16px; }
+  .step b { display: block; margin-bottom: 4px; }
+  .step pre { margin: 8px 0 0; background: #0a0c11; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow: auto; font: 12.5px/1.5 var(--mono); }
+  .feat { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 36px; }
+  .feat div { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; background: var(--panel-2); font-size: 14px; }
+  .feat b { display: block; margin-bottom: 4px; }
+  .fine { color: var(--muted); font-size: 13px; margin-top: 28px; line-height: 1.6; }
+  .fine code { font-family: var(--mono); background: #0a0c11; border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<header class="top"><a class="brand" href="/">agent<span>cast</span></a></header>
+<main class="hero">
+  <h1>Watch a coding agent work. Live, from a link.</h1>
+  <p>agentcast streams your Claude Code session to a shareable page: prompts, replies, tool calls, diffs and results, as they happen. When the session ends, the link becomes a replay.</p>
+  <div class="steps">
+    <div class="step"><b>1. Install the hook</b>One command, needs Node 18+. It downloads the hook to <code>~/.agentcast</code> and adds it to your Claude Code settings.<pre>curl -fsSL https://agentcast.agentcast.workers.dev/install.sh | sh</pre>Only one project? Add <code>-s -- --project ~/your-repo</code>. Remove with <code>-s -- --uninstall</code>.</div>
+    <div class="step"><b>2. Start a session</b>Open Claude Code as usual. The share link appears as a system message on startup.</div>
+    <div class="step"><b>3. Share the link</b>Anyone with the link watches live, then scrubs through the replay once the session ends.</div>
+  </div>
+  <div class="feat">
+    <div><b>Live and replay</b>Events stream over WebSockets. Ended sessions get a timeline scrubber with play, step and speed controls.</div>
+    <div><b>Private links</b>Set <code>AGENTCAST_PASSPHRASE</code> and viewers must enter it before anything loads.</div>
+    <div><b>Smart titles</b>When a session ends, a model running on Cloudflare writes a title and two-line summary for link previews.</div>
+    <div><b>24-hour expiry</b>Sessions delete themselves a day after they start. No accounts, nothing indexed.</div>
+  </div>
+  <p class="fine">Privacy defaults: the agent’s private thinking is never uploaded, common secret formats are redacted before leaving your machine and again on the server, and only your project folder name is sent, never the full path. <code>AGENTCAST_DISABLE=1</code> pauses streaming, <code>AGENTCAST_NO_AI=1</code> skips the generated summary.</p>
+</main>
+</body>
+</html>

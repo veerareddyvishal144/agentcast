@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>agentcast · session</title>
+<link rel="stylesheet" href="/viewer.css" />
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/">agent<span>cast</span></a>
+  <div class="title-wrap">
+    <h1 id="title">Loading session…</h1>
+    <div class="sub">
+      <span id="status" class="pill connecting">connecting</span>
+      <span id="project"></span>
+      <span id="model"></span>
+      <span id="started"></span>
+      <span id="viewers"></span>
+    </div>
+    <p id="summary" class="summary"></p>
+  </div>
+  <div class="actions">
+    <button id="copy" class="btn" title="Copy link">Copy link</button>
+    <button id="toggle-tools" class="btn ghost" title="Collapse or expand all tool calls">Expand tools</button>
+  </div>
+</header>
+
+<main id="stream" class="stream">
+  <div id="empty" class="empty">Waiting for the first event…</div>
+</main>
+
+<button id="jump" class="jump hidden">↓ New events</button>
+
+<div id="gate" class="gate hidden">
+  <form id="gate-form" class="gate-card">
+    <h2>This session is private</h2>
+    <p>Enter the passphrase the sharer gave you.</p>
+    <input id="gate-input" type="password" autocomplete="off" placeholder="Passphrase" required />
+    <button class="btn" type="submit">View session</button>
+    <div id="gate-error" class="gate-error"></div>
+  </form>
+</div>
+
+<footer class="foot">
+  <div id="replay" class="replay hidden" aria-label="Replay controls">
+    <button id="rp-play" class="btn" title="Play / pause (space)">▶</button>
+    <button id="rp-back" class="btn ghost" title="Previous event (←)">‹</button>
+    <button id="rp-fwd" class="btn ghost" title="Next event (→)">›</button>
+    <input id="rp-range" type="range" min="0" max="0" value="0" step="1" />
+    <span id="rp-label" class="rp-label"></span>
+    <select id="rp-speed" class="btn ghost" title="Playback speed">
+      <option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option><option value="8">8×</option>
+    </select>
+  </div>
+  <div class="foot-meta">
+    <span id="expiry"></span>
+    <span>Shared with <a href="/">agentcast</a>. Thinking is never uploaded; secrets are redacted on the sender’s machine.</span>
+  </div>
+</footer>
+
+<script src="/viewer.js"></script>
+</body>
+</html>
