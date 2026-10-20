@@ -57,14 +57,23 @@ async function main() {
 
   const stateFile = path.join(STATE_DIR, `${session_id}.json`);
   let state = readJson(stateFile);
-  if (state?.disabled) return;
+  let resumedFrom = null;
+  if (state?.disabled) {
+    // The agentcast session is over. If the user ended it on purpose (CLI `end`, or the server
+    // refused further events), stay quiet for the rest of this Claude session. If Claude Code
+    // simply quit and was resumed (`claude --resume` / `--continue`), continue in a fresh link,
+    // starting from where the transcript left off so nothing is uploaded twice.
+    if (hook_event_name === "SessionEnd" || state.endReason === "manual" || state.endReason === "refused") return;
+    resumedFrom = state;
+    state = null;
+  }
 
   if (!state) {
     const project = cwd ? path.basename(cwd) : "";
     const created = await http("POST", `${cfg.serverUrl}/api/sessions`, {
       agent: "claude-code",
       project,
-      title: project ? `${project} session` : "Claude Code session",
+      title: `${project || "Claude Code"} session${resumedFrom ? " (continued)" : ""}`,
       passphrase: cfg.passphrase,
       ai: cfg.aiSummary,
     });
@@ -72,11 +81,19 @@ async function main() {
       if (created.status === 0 || created.status >= 500) setBackoff();
       return;
     }
-    state = { id: created.body.id, token: created.body.token, url: created.body.url, server: cfg.serverUrl, offset: 0, titled: false, project, protected: !!cfg.passphrase, createdAt: new Date().toISOString() };
+    state = {
+      id: created.body.id, token: created.body.token, url: created.body.url, server: cfg.serverUrl,
+      offset: resumedFrom?.offset || 0, model: resumedFrom?.model, titled: false, project,
+      protected: !!cfg.passphrase, createdAt: new Date().toISOString(), continues: resumedFrom?.id,
+    };
     writeJson(stateFile, state);
     fs.writeFileSync(path.join(HOME_DIR, "last-url"), state.url + "\n");
-    await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_start", data: { agent: "claude-code", project, source: payload.source || hook_event_name } }], null);
-    emit(`agentcast is live: ${state.url}${cfg.passphrase ? "  (passphrase protected)" : ""}`);
+    const startData = { agent: "claude-code", project, source: payload.source || hook_event_name };
+    if (resumedFrom) { startData.continues = resumedFrom.id; startData.continuesUrl = resumedFrom.url; }
+    await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_start", data: startData }], null);
+    emit(resumedFrom
+      ? `agentcast continues in a new link: ${state.url}  (earlier part: ${resumedFrom.url})`
+      : `agentcast is live: ${state.url}${cfg.passphrase ? "  (passphrase protected)" : ""}`);
   }
 
   // Paused: keep the offset moving so paused content is never uploaded later.
@@ -131,6 +148,7 @@ export async function endSession(cfg, state, stateFile, reason = "end") {
   await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_end", data: { reason } }], null);
   await http("POST", `${cfg.serverUrl}/api/sessions/${state.id}/end`, null, state.token);
   state.disabled = true;
+  state.endReason = reason; // "manual" from the CLI; Claude Code's reason (exit, clear, logout…) otherwise
   state.endedAt = new Date().toISOString();
   writeJson(stateFile, state);
 }
@@ -266,7 +284,8 @@ export async function postEvents(cfg, state, events, patch) {
     if (res.status === 200) continue;
     if (res.status === 0) { setBackoff(); return false; }
     if (res.status === 404 || res.status === 401) { state.reset = true; return false; }
-    if (res.status === 410 || res.status === 413) { state.disabled = true; return false; }
+    if (res.status === 410) { state.disabled = true; state.endReason = "refused"; return false; } // ended elsewhere
+    if (res.status === 413) { state.disabled = true; state.endReason = "limit"; return false; }   // full: a resume may continue in a new link
     return false;
   }
   return true;

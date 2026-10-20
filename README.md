@@ -100,6 +100,22 @@ npm run deploy
 
 Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a rate limiter (20 session creations per IP per minute), and vars for TTL, event cap, AI model, and public URL.
 
+## Session lifecycle
+
+What the hook does at each point in a Claude Code session:
+
+| You do | What happens to the link |
+|---|---|
+| Start Claude Code | A new session and link are created; the link is shown as a system message |
+| Work, interrupt with Esc, keep going | Same link keeps streaming. Interrupting a reply is not a session boundary |
+| `/compact` | Same link; compaction summaries are not uploaded |
+| `/clear` | The current link ends; the next prompt starts a new session and a new link |
+| Quit Claude Code | The link ends (replay mode, AI summary runs) |
+| `claude --resume` or `--continue` after a quit | A **continuation link** is created, holding only what happens from the resume onward. Its first line links back to the earlier part, and the hook names both links in the system message |
+| `/agentcast:end` or `agentcast end` | The link ends and the hook stays silent for the rest of that Claude session, even across resumes |
+| Terminal closed or crash (no session-end signal) | The link stays "live" until it expires. There is no inactivity timeout yet |
+| Two Claude Code windows at once | Two independent links. The CLI acts on whichever session's hook ran most recently |
+
 ## Link expiration
 
 Every session link has a fixed lifetime, counted from the moment the session **starts**, not from when it ends. The default is 24 hours.

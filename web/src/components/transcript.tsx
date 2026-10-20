@@ -24,7 +24,13 @@ export const Transcript = memo(function Transcript({ events, results, agent, end
   const { turns, start, end } = useMemo(() => buildTurns(events, results), [events, results]);
   return (
     <div className={cn("divide-y divide-border/70", compact ? "text-[13px]" : "text-[15px]")}>
-      {start && <SystemLine ev={start} text={`Started ${clock(start.ts)}${start.data.project ? ` in ${String(start.data.project)}` : ""}`} />}
+      {start && (
+        <SystemLine ev={start} text={`Started ${clock(start.ts)}${start.data.project ? ` in ${String(start.data.project)}` : ""}`}>
+          {typeof start.data.continues === "string" && (
+            <> · continues <a className="underline underline-offset-2 hover:text-foreground" href={`/s/${encodeURIComponent(String(start.data.continues))}`}>an earlier session</a></>
+          )}
+        </SystemLine>
+      )}
       {turns.map((t) => <TurnView key={t.key} turn={t} agent={agent} ended={ended} toolsOpen={toolsOpen} compact={compact} dim={dimOutside ?? null} />)}
       {end && <SystemLine ev={end} text={`Ended ${clock(end.ts)}`} />}
     </div>
@@ -88,8 +94,8 @@ function AgentGlyph() {
   return <span className="grid size-6 place-items-center rounded-md border bg-card text-brand"><Sparkles className="size-3.5" /></span>;
 }
 
-function SystemLine({ ev, text }: { ev: StoredEvent; text: string }) {
-  return <p className="py-2 text-xs text-muted-foreground" title={new Date(ev.ts).toLocaleString()}>{text}</p>;
+function SystemLine({ ev, text, children }: { ev: StoredEvent; text: string; children?: React.ReactNode }) {
+  return <p className="py-2 text-xs text-muted-foreground" title={new Date(ev.ts).toLocaleString()}>{text}{children}</p>;
 }
 
 // ---------- tools ----------
