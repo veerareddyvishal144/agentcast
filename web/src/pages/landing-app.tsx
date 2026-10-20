@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Brand } from "@/components/brand";
 import { StatusPill } from "@/components/status-pill";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Timeline } from "@/components/timeline";
+import { Transcript } from "@/components/transcript";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,8 +21,7 @@ export function LandingApp() {
   return (
     <TooltipProvider>
       <div className="relative min-h-dvh overflow-x-clip bg-background">
-        <div className="bg-grid pointer-events-none absolute inset-x-0 top-0 h-[720px]" />
-        <div className="pointer-events-none absolute -top-40 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-brand/20 blur-[120px]" />
+        <div className="bg-grid pointer-events-none absolute inset-x-0 top-0 h-[560px] opacity-60" />
         <Nav />
         <Hero />
         <HowItWorks />
@@ -109,16 +108,15 @@ function DemoPlayer() {
 
   return (
     <div className="relative">
-      <div className="pointer-events-none absolute -inset-6 rounded-[2rem] bg-gradient-to-br from-brand/25 via-transparent to-live/20 blur-2xl" />
-      <div className="relative overflow-hidden rounded-2xl border bg-card/90 shadow-2xl shadow-black/30 backdrop-blur">
+      <div className="relative overflow-hidden rounded-xl border bg-card shadow-2xl shadow-black/25">
         <div className="flex items-center gap-3 border-b px-4 py-2.5">
           <div className="flex gap-1.5"><span className="size-2.5 rounded-full bg-bad/80" /><span className="size-2.5 rounded-full bg-warn/80" /><span className="size-2.5 rounded-full bg-live/80" /></div>
           <div className="min-w-0 flex-1 truncate text-xs font-medium">{sampleMeta.title}</div>
           <StatusPill status={done ? "ended" : "live"} />
           <span className="hidden items-center gap-1 text-[11px] text-muted-foreground sm:inline-flex"><Users className="size-3" />{viewers}</span>
         </div>
-        <div ref={scroller} className="h-[400px] overflow-y-auto px-4 py-4 sm:h-[440px]">
-          <Timeline events={visible} results={results} agent={sampleMeta.agent} ended={done} toolsOpen={null} compact />
+        <div ref={scroller} className="h-[400px] overflow-y-auto px-4 sm:h-[440px]">
+          <Transcript events={visible} results={results} agent={sampleMeta.agent} ended={done} toolsOpen={null} compact />
         </div>
         <div className="flex items-center gap-3 border-t px-4 py-2.5">
           <span className="grid size-7 place-items-center rounded-full bg-primary text-primary-foreground">{done ? <History className="size-3.5" /> : <Play className="size-3.5" />}</span>

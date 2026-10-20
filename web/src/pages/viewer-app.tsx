@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, Ghost, ShieldCheck } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowDown, Ghost } from "lucide-react";
 import { toast } from "sonner";
 import { ClipBanner } from "@/components/clip-banner";
+import { DocHeader } from "@/components/doc-header";
 import { GateDialog } from "@/components/gate-dialog";
 import { Outline } from "@/components/outline";
 import { ReplayDock, type Range } from "@/components/replay-dock";
 import { SessionHeader } from "@/components/session-header";
-import { Timeline } from "@/components/timeline";
+import { Transcript } from "@/components/transcript";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Toaster } from "@/components/ui/sonner";
@@ -16,7 +17,6 @@ import { clipUrl, useClip } from "@/hooks/use-clip";
 import { useReplay } from "@/hooks/use-replay";
 import { useSession } from "@/hooks/use-session";
 import { downloadText, exportFilename, sessionJson, sessionMarkdown } from "@/lib/export";
-import { dateTime } from "@/lib/format";
 import type { StoredEvent } from "@/lib/types";
 
 export function ViewerApp() {
@@ -62,6 +62,17 @@ export function ViewerApp() {
 
   const { pending, jump } = useAutoScroll(s.events.length, replay.cursorSeq === Infinity && !ended && !clip);
 
+  // Reveal the title in the sticky bar once the document header scrolls away.
+  const docRef = useRef<HTMLDivElement>(null);
+  const [showTitle, setShowTitle] = useState(false);
+  useEffect(() => {
+    const el = docRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver(([e]) => setShowTitle(!e.isIntersecting), { rootMargin: "-48px 0px 0px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [s.status]);
+
   useEffect(() => {
     const prefix = s.status === "live" ? "● " : "";
     document.title = `${prefix}${clip ? "Clip · " : ""}${s.meta?.title ?? "session"} · agentcast`;
@@ -77,6 +88,7 @@ export function ViewerApp() {
   }, [visible, replay.scrubbed, replay.playing, toolSeqById]);
 
   const hiddenAfter = replay.cursorSeq === Infinity ? Number.POSITIVE_INFINITY : replay.cursorSeq;
+  const countOf = (evs: StoredEvent[]) => evs.filter((e) => e.kind !== "tool_result").length;
 
   const onCreateClip = useCallback(async (r: Range) => {
     const c = { from: r.fromSeq, to: r.toSeq };
@@ -97,37 +109,30 @@ export function ViewerApp() {
   return (
     <TooltipProvider>
       <div className="min-h-dvh overflow-x-clip bg-background">
-        <div className="bg-grid pointer-events-none fixed inset-x-0 top-0 h-[480px]" />
         <SessionHeader
-          meta={s.meta} status={s.status} viewers={s.viewers} events={baseEvents} hiddenAfter={hiddenAfter}
+          meta={s.meta} events={baseEvents} hiddenAfter={hiddenAfter} showTitle={showTitle}
           toolsOpen={toolsOpen} onToggleTools={() => setToolsOpen((v) => (v === true ? false : true))}
           onExport={onExport} canExport={!!s.meta && baseEvents.length > 0}
         />
 
-        <div className="relative mx-auto flex max-w-6xl gap-8 px-4 pt-6 pb-32">
-          <main className="min-w-0 flex-1">
-            {clip && <ClipBanner count={baseEvents.filter((e) => e.kind !== "tool_result").length} total={s.events.filter((e) => e.kind !== "tool_result").length} onClear={() => setClip(null)} />}
-            {s.status === "gone" ? (
-              <EmptyState />
-            ) : s.events.length === 0 ? (
-              <LoadingState locked={s.needsKey} />
-            ) : baseEvents.length === 0 ? (
-              <p className="rounded-xl border bg-card p-6 text-sm text-muted-foreground">This clip range has no events. <button className="underline" onClick={() => setClip(null)}>Show the full session.</button></p>
-            ) : (
-              <Timeline events={visible} results={results} agent={s.meta?.agent ?? "Agent"} ended={ended} toolsOpen={toolsOpen} dimOutside={preview} />
-            )}
-            {s.meta && (
-              <p className="mt-10 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-center text-[11px] text-muted-foreground">
-                <span className="inline-flex items-center gap-1"><ShieldCheck className="size-3" /> Thinking is never uploaded. Secrets are redacted on the sender's machine.</span>
-                <span>Link expires {dateTime(s.meta.expiresAt)}.</span>
-              </p>
-            )}
-          </main>
-          <aside className="hidden w-64 shrink-0 lg:block">
-            <div className="sticky top-24">
-              <div className="mb-2 px-2 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Turns</div>
-              <Outline events={baseEvents} hiddenAfter={hiddenAfter} />
+        <div className="mx-auto flex max-w-[1120px] gap-12 px-5 pt-10 pb-32">
+          <main className="min-w-0 max-w-[760px] flex-1">
+            <DocHeader ref={docRef} meta={s.meta} status={s.status} viewers={s.viewers} clipLabel={clip ? `Clip · ${countOf(baseEvents)} of ${countOf(s.events)} events` : null} />
+            <div className="pt-2">
+              {clip && <div className="pt-4"><ClipBanner count={countOf(baseEvents)} total={countOf(s.events)} onClear={() => setClip(null)} /></div>}
+              {s.status === "gone" ? (
+                <EmptyState />
+              ) : s.events.length === 0 ? (
+                <LoadingState locked={s.needsKey} />
+              ) : baseEvents.length === 0 ? (
+                <p className="py-6 text-sm text-muted-foreground">This clip range has no events. <button className="underline" onClick={() => setClip(null)}>Show the full session.</button></p>
+              ) : (
+                <Transcript events={visible} results={results} agent={s.meta?.agent ?? "Agent"} ended={ended} toolsOpen={toolsOpen} dimOutside={preview} />
+              )}
             </div>
+          </main>
+          <aside className="hidden w-[220px] shrink-0 lg:block">
+            <div className="sticky top-20"><Outline events={baseEvents} hiddenAfter={hiddenAfter} meta={s.meta} /></div>
           </aside>
         </div>
 
@@ -144,23 +149,23 @@ export function ViewerApp() {
 
 function LoadingState({ locked }: { locked: boolean }) {
   return (
-    <div className="space-y-3" aria-busy>
-      {locked ? null : <p className="px-1 text-xs text-muted-foreground">Waiting for the first event…</p>}
-      <Skeleton className="h-20 w-full rounded-2xl" />
-      <Skeleton className="h-28 w-full rounded-2xl" />
-      <Skeleton className="h-10 w-full rounded-xl" />
-      <Skeleton className="h-10 w-5/6 rounded-xl" />
+    <div className="space-y-4 pt-6" aria-busy>
+      {locked ? null : <p className="text-xs text-muted-foreground">Waiting for the first event…</p>}
+      <Skeleton className="h-4 w-2/3" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-5/6" />
+      <Skeleton className="mt-6 h-9 w-full rounded-lg" />
     </div>
   );
 }
 
 function EmptyState() {
   return (
-    <div className="mx-auto mt-16 max-w-md rounded-2xl border bg-card p-8 text-center shadow-sm">
-      <div className="mx-auto mb-4 grid size-12 place-items-center rounded-2xl border bg-muted/50 text-muted-foreground"><Ghost className="size-6" /></div>
+    <div className="mt-10 max-w-md">
+      <div className="mb-4 grid size-10 place-items-center rounded-lg border bg-card text-muted-foreground"><Ghost className="size-5" /></div>
       <h2 className="text-lg font-semibold">This session is gone</h2>
       <p className="mt-2 text-sm text-muted-foreground">The link has expired or never existed. agentcast sessions delete themselves 24 hours after they start.</p>
-      <Button asChild variant="outline" className="mt-6"><a href="/">Learn about agentcast</a></Button>
+      <Button asChild variant="outline" size="sm" className="mt-5"><a href="/">About agentcast</a></Button>
     </div>
   );
 }

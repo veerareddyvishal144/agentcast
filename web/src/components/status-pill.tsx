@@ -1,21 +1,21 @@
-import { Lock, Radio, Wifi, WifiOff, Flag, Hourglass, Ghost } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Status } from "@/lib/types";
 
-const map: Record<Status, { label: string; cls: string; dot: string; Icon: typeof Radio; pulse?: boolean }> = {
-  live: { label: "Live", cls: "border-live/40 text-live bg-live/10", dot: "bg-live", Icon: Radio, pulse: true },
-  ended: { label: "Ended", cls: "border-border text-muted-foreground bg-muted/40", dot: "bg-muted-foreground", Icon: Flag },
-  expired: { label: "Expired", cls: "border-bad/40 text-bad bg-bad/10", dot: "bg-bad", Icon: Hourglass },
-  gone: { label: "Not found", cls: "border-bad/40 text-bad bg-bad/10", dot: "bg-bad", Icon: Ghost },
-  locked: { label: "Private", cls: "border-warn/40 text-warn bg-warn/10", dot: "bg-warn", Icon: Lock },
-  connecting: { label: "Connecting", cls: "border-warn/40 text-warn bg-warn/10", dot: "bg-warn", Icon: Wifi, pulse: true },
-  reconnecting: { label: "Reconnecting", cls: "border-warn/40 text-warn bg-warn/10", dot: "bg-warn", Icon: WifiOff, pulse: true },
+const map: Record<Status, { label: string; text: string; dot: string; pulse?: boolean }> = {
+  live: { label: "Live", text: "text-live", dot: "bg-live", pulse: true },
+  ended: { label: "Ended", text: "text-muted-foreground", dot: "bg-muted-foreground/70" },
+  expired: { label: "Expired", text: "text-bad", dot: "bg-bad" },
+  gone: { label: "Not found", text: "text-bad", dot: "bg-bad" },
+  locked: { label: "Private", text: "text-warn", dot: "bg-warn" },
+  connecting: { label: "Connecting", text: "text-muted-foreground", dot: "bg-warn", pulse: true },
+  reconnecting: { label: "Reconnecting", text: "text-muted-foreground", dot: "bg-warn", pulse: true },
 };
 
+/** Quiet status indicator: a dot and a word. */
 export function StatusPill({ status, className }: { status: Status; className?: string }) {
   const s = map[status];
   return (
-    <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-semibold tracking-wide uppercase", s.cls, className)}>
+    <span className={cn("inline-flex items-center gap-1.5 text-xs font-medium", s.text, className)}>
       <span className={cn("size-1.5 rounded-full", s.dot, s.pulse && "animate-pulse-dot")} />
       {s.label}
     </span>

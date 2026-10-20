@@ -199,8 +199,8 @@
 
 @utility bg-grid {
   background-image:
-    linear-gradient(to right, color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px),
-    linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 6%, transparent) 1px, transparent 1px);
+    linear-gradient(to right, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 4%, transparent) 1px, transparent 1px);
   background-size: 40px 40px;
   mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 30%, transparent 75%);
 }
@@ -226,7 +226,7 @@
 /* markdown inside cards */
 .md > :first-child { margin-top: 0; }
 .md > :last-child { margin-bottom: 0; }
-.md p { margin: 0.4rem 0; line-height: 1.6; }
+.md p { margin: 0.35rem 0; line-height: 1.65; }
 .md ul, .md ol { margin: 0.4rem 0; padding-left: 1.25rem; }
 .md ul { list-style: disc; } .md ol { list-style: decimal; }
 .md li { margin: 0.15rem 0; }
