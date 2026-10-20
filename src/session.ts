@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { redactDeep, redactText } from "../shared/redact.mjs";
+import { redactDeep, redactText } from "../plugin/shared/redact.mjs";
 
 export interface Env {
   SESSIONS: DurableObjectNamespace<SessionDO>;
@@ -20,6 +20,7 @@ export type Meta = {
   model: string | null;
   protected: boolean;
   ai: boolean;
+  titleLocked: boolean;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
@@ -77,6 +78,7 @@ export class SessionDO extends DurableObject<Env> {
       model: input.model ? clip(input.model, 80) : null,
       protected: !!input.passphrase,
       ai: input.ai !== false && !!this.env.AI,
+      titleLocked: false,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       endedAt: null,
@@ -137,7 +139,7 @@ export class SessionDO extends DurableObject<Env> {
     meta.updatedAt = new Date().toISOString();
     let metaChanged = false;
     const safePatch = (patch ? redactDeep(patch) : undefined) as MetaPatch | undefined;
-    if (safePatch?.title && safePatch.title !== meta.title) {
+    if (safePatch?.title && !meta.titleLocked && safePatch.title !== meta.title) {
       meta.title = clip(safePatch.title, 120);
       metaChanged = true;
     }
@@ -169,6 +171,21 @@ export class SessionDO extends DurableObject<Env> {
         await this.ctx.storage.setAlarm(Date.now() + 500);
       }
     }
+    return { ok: true, value: meta };
+  }
+
+  async rename(token: string | null, title: unknown): Promise<Result<Meta>> {
+    const meta = await this.meta();
+    if (!meta) return { ok: false, status: 404, error: "no such session" };
+    if (!(await this.authorizedWriter(token))) return { ok: false, status: 401, error: "bad token" };
+    if (meta.endedAt) return { ok: false, status: 410, error: "session ended" };
+    const clean = typeof title === "string" ? redactText(title.replace(/\s+/g, " ").trim()) : "";
+    if (clean.length < 1 || clean.length > 120) return { ok: false, status: 400, error: "title must be 1 to 120 characters" };
+    meta.title = clean;
+    meta.titleLocked = true;
+    meta.updatedAt = new Date().toISOString();
+    await this.ctx.storage.put("meta", meta);
+    this.broadcast({ type: "meta", meta });
     return { ok: true, value: meta };
   }
 
@@ -350,7 +367,7 @@ ${lines.join("\n")}`;
     const fresh = await this.meta();
     if (!fresh) return;
     let changed = false;
-    if (typeof parsed.title === "string" && parsed.title.trim().length >= 4) {
+    if (!fresh.titleLocked && typeof parsed.title === "string" && parsed.title.trim().length >= 4) {
       fresh.title = clip(redactText(parsed.title.trim()), 120);
       changed = true;
     }

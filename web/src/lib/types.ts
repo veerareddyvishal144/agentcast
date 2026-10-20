@@ -7,6 +7,7 @@ export type Meta = {
   model: string | null;
   protected: boolean;
   ai: boolean;
+  titleLocked?: boolean;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;

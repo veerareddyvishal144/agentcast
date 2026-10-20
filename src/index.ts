@@ -4,7 +4,7 @@ export { SessionDO };
 
 const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
   "access-control-allow-headers": "authorization,content-type,x-agentcast-key",
 };
 const ID_RE = /^[a-z0-9]{6,32}$/;
@@ -45,14 +45,18 @@ async function viewerPage(env: Env, url: URL, id: string): Promise<Response> {
   let html = await htmlRes.text();
 
   const origin = url.origin;
+  const from = Number(url.searchParams.get("from") || "");
+  const to = Number(url.searchParams.get("to") || "");
+  const isClip = Number.isInteger(from) && Number.isInteger(to) && from > 0 && to >= from;
   let title = "agentcast session";
   let desc = "Watch a coding agent work, live from a link.";
   if (metaRes?.ok) {
     const m = metaRes.value.meta;
     if (metaRes.value.authorized) {
       const full = m as Meta;
-      title = full.title || title;
+      title = isClip ? `Clip from ${full.title || "a session"}` : full.title || title;
       desc = full.summary || `${full.agent}${full.project ? ` in ${full.project}` : ""}${full.endedAt ? " · finished" : " · live"} session on agentcast.`;
+      if (isClip) desc = `Events ${from} to ${to}. ${desc}`;
     } else {
       title = "Private agentcast session";
       desc = "This session needs a passphrase to view.";
@@ -67,7 +71,7 @@ async function viewerPage(env: Env, url: URL, id: string): Promise<Response> {
     `<meta property="og:site_name" content="agentcast" />`,
     `<meta property="og:title" content="${attr(title)}" />`,
     `<meta property="og:description" content="${attr(desc)}" />`,
-    `<meta property="og:url" content="${attr(`${origin}/s/${id}`)}" />`,
+    `<meta property="og:url" content="${attr(`${origin}/s/${id}${isClip ? `?from=${from}&to=${to}` : ""}`)}" />`,
     `<meta property="og:image" content="${attr(`${origin}/og.png`)}" />`,
     `<meta property="og:image:width" content="1200" />`,
     `<meta property="og:image:height" content="630" />`,
@@ -105,6 +109,12 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     const after = Number(url.searchParams.get("after") || "0") || 0;
     const limit = Number(url.searchParams.get("limit") || "1000") || 1000;
     return fromResult(await stub.getState(after, limit, key));
+  }
+
+  if (!sub && req.method === "PATCH") {
+    if (tooLarge(req)) return json({ error: "body too large" }, 413);
+    const body = (await readJson(req)) as { title?: unknown } | null;
+    return fromResult(await stub.rename(bearer(req), body?.title));
   }
 
   if (sub === "meta" && req.method === "GET") {

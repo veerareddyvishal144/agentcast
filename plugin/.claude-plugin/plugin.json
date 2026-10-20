@@ -1,0 +1,32 @@
+{
+  "name": "agentcast",
+  "displayName": "agentcast",
+  "version": "0.2.0",
+  "description": "Stream your Claude Code session to a shareable live link. Viewers watch prompts, replies, tool calls and diffs as they happen, then replay when it ends.",
+  "author": { "name": "Vishal Veera Reddy" },
+  "homepage": "https://agentcast.agentcast.workers.dev",
+  "keywords": ["share", "stream", "live", "replay", "session", "pair-programming"],
+  "userConfig": {
+    "server_url": {
+      "type": "string",
+      "title": "Server URL",
+      "description": "agentcast server to stream to. Leave empty for the hosted service at https://agentcast.agentcast.workers.dev"
+    },
+    "passphrase": {
+      "type": "string",
+      "title": "Viewer passphrase",
+      "description": "If set, viewers must enter this before anything loads. Leave empty for link-only access.",
+      "sensitive": true
+    },
+    "ai_summary": {
+      "type": "boolean",
+      "title": "AI title and summary",
+      "description": "When a session ends, generate a short title and summary with Workers AI (on by default)."
+    },
+    "enabled": {
+      "type": "boolean",
+      "title": "Streaming enabled",
+      "description": "Turn off to stop streaming without uninstalling (on by default)."
+    }
+  }
+}

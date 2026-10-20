@@ -12,15 +12,16 @@ type Props = {
   ended: boolean;
   toolsOpen: boolean | null;
   compact?: boolean;
+  dimOutside?: { fromSeq: number; toSeq: number } | null;
 };
 
-export const Timeline = memo(function Timeline({ events, results, agent, ended, toolsOpen, compact }: Props) {
+export const Timeline = memo(function Timeline({ events, results, agent, ended, toolsOpen, compact, dimOutside }: Props) {
   return (
     <ol className={cn("relative", compact ? "space-y-2 pl-7" : "space-y-3 pl-9 sm:pl-10", "before:absolute before:inset-y-2 before:left-[11px] before:w-px before:bg-border")}>
       {events.map((ev) => {
         if (ev.kind === "tool_result") return null;
         return (
-          <li key={ev.seq} id={`ev-${ev.seq}`} className="relative scroll-mt-32">
+          <li key={ev.seq} id={`ev-${ev.seq}`} className={cn("relative scroll-mt-32 transition-opacity", dimOutside && (ev.seq < dimOutside.fromSeq || ev.seq > dimOutside.toSeq) && "opacity-30")}>
             <Node ev={ev} compact={compact} />
             {ev.kind === "user" && <UserCard ev={ev} compact={compact} />}
             {ev.kind === "assistant_text" && <AssistantCard ev={ev} agent={agent} compact={compact} />}

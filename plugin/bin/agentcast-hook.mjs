@@ -1,37 +1,58 @@
 #!/usr/bin/env node
 // agentcast hook for Claude Code.
-// Wire it to SessionStart, UserPromptSubmit, PostToolUse, Stop and SessionEnd.
+// Wired (by the plugin's hooks.json, or by install.mjs for the curl install) to
+// SessionStart, UserPromptSubmit, PostToolUse, Stop and SessionEnd.
 // On every call it tails the session transcript from the last byte offset,
 // converts new lines to events, redacts secrets, and posts them to agentcast.
 // It never exits non-zero and never blocks Claude Code for more than a few seconds.
 //
-// Environment:
-//   AGENTCAST_URL         server origin (default http://localhost:8787)
-//   AGENTCAST_PASSPHRASE  if set, viewers must enter this passphrase
-//   AGENTCAST_NO_AI=1     skip the AI-generated title and summary at session end
-//   AGENTCAST_DISABLE=1   do nothing
+// Configuration, first match wins:
+//   plugin setting            env var                 meaning
+//   server_url                AGENTCAST_URL           server origin (default: hosted agentcast)
+//   passphrase                AGENTCAST_PASSPHRASE    viewers must enter this passphrase
+//   ai_summary (true/false)   AGENTCAST_NO_AI=1       AI-generated title and summary at session end
+//   enabled (true/false)      AGENTCAST_DISABLE=1     turn streaming off entirely
+// Plugin settings arrive as CLAUDE_PLUGIN_OPTION_<NAME> environment variables.
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { redactDeep, redactText } from "../shared/redact.mjs";
 
-const BASE = (process.env.AGENTCAST_URL || "http://localhost:8787").replace(/\/+$/, "");
-const HOME_DIR = path.join(os.homedir(), ".agentcast");
-const STATE_DIR = path.join(HOME_DIR, "sessions");
+export const HOSTED_URL = "https://agentcast.agentcast.workers.dev";
+export const HOME_DIR = path.join(os.homedir(), ".agentcast");
+export const STATE_DIR = path.join(HOME_DIR, "sessions");
 const BACKOFF_FILE = path.join(HOME_DIR, "backoff.json");
+const CURRENT_FILE = path.join(HOME_DIR, "current");
 const LIMITS = { text: 32_000, string: 6_000, toolResult: 10_000, batch: 150 };
 const TIMEOUT_MS = 5_000;
 
-main().catch(() => {}).finally(() => process.exit(0));
+export function resolveConfig(env = process.env) {
+  const opt = (name) => {
+    const v = env[`CLAUDE_PLUGIN_OPTION_${name}`];
+    return v === undefined || v === "" ? undefined : v;
+  };
+  const bool = (v, fallback) => (v === undefined ? fallback : !/^(false|0|no|off)$/i.test(String(v)));
+  return {
+    serverUrl: (opt("SERVER_URL") || env.AGENTCAST_URL || HOSTED_URL).replace(/\/+$/, ""),
+    passphrase: opt("PASSPHRASE") || env.AGENTCAST_PASSPHRASE || undefined,
+    aiSummary: bool(opt("AI_SUMMARY"), env.AGENTCAST_NO_AI !== "1"),
+    enabled: bool(opt("ENABLED"), env.AGENTCAST_DISABLE !== "1"),
+  };
+}
+
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath_(import.meta.url);
+if (isMain) main().catch(() => {}).finally(() => process.exit(0));
 
 async function main() {
-  if (process.env.AGENTCAST_DISABLE === "1") return;
+  const cfg = resolveConfig();
+  if (!cfg.enabled) return;
   const payload = parse(await readStdin());
   if (!payload || !payload.session_id) return;
   const { session_id, transcript_path, cwd, hook_event_name } = payload;
 
   fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.writeFileSync(CURRENT_FILE, session_id + "\n");
   if (inBackoff()) return;
 
   const stateFile = path.join(STATE_DIR, `${session_id}.json`);
@@ -40,41 +61,52 @@ async function main() {
 
   if (!state) {
     const project = cwd ? path.basename(cwd) : "";
-    const passphrase = process.env.AGENTCAST_PASSPHRASE || undefined;
-    const created = await http("POST", `${BASE}/api/sessions`, {
+    const created = await http("POST", `${cfg.serverUrl}/api/sessions`, {
       agent: "claude-code",
       project,
       title: project ? `${project} session` : "Claude Code session",
-      passphrase,
-      ai: process.env.AGENTCAST_NO_AI !== "1",
+      passphrase: cfg.passphrase,
+      ai: cfg.aiSummary,
     });
     if (created.status !== 201 || !created.body?.id) {
       if (created.status === 0 || created.status >= 500) setBackoff();
       return;
     }
-    state = { id: created.body.id, token: created.body.token, url: created.body.url, offset: 0, titled: false, project };
+    state = { id: created.body.id, token: created.body.token, url: created.body.url, server: cfg.serverUrl, offset: 0, titled: false, project, protected: !!cfg.passphrase, createdAt: new Date().toISOString() };
     writeJson(stateFile, state);
     fs.writeFileSync(path.join(HOME_DIR, "last-url"), state.url + "\n");
-    await postEvents(state, [{ ts: new Date().toISOString(), kind: "session_start", data: { agent: "claude-code", project, source: payload.source || hook_event_name } }], null);
-    emit(`agentcast is live: ${state.url}${passphrase ? "  (passphrase protected)" : ""}`);
+    await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_start", data: { agent: "claude-code", project, source: payload.source || hook_event_name } }], null);
+    emit(`agentcast is live: ${state.url}${cfg.passphrase ? "  (passphrase protected)" : ""}`);
+  }
+
+  // Paused: keep the offset moving so paused content is never uploaded later.
+  if (state.paused) {
+    if (transcript_path && fs.existsSync(transcript_path)) {
+      const { offset } = tailTranscript(transcript_path, state.offset || 0, state, { dryRun: true });
+      if (offset !== state.offset) { state.offset = offset; writeJson(stateFile, state); }
+    }
+    if (hook_event_name === "SessionEnd") await endSession(cfg, state, stateFile, payload.reason);
+    return;
   }
 
   // Push the prompt immediately so viewers see it before the agent's first tool call.
   if (hook_event_name === "UserPromptSubmit" && typeof payload.prompt === "string" && payload.prompt.trim()) {
     const text = clip(cleanUserText(payload.prompt), LIMITS.text);
-    const ev = { ts: new Date().toISOString(), kind: "user", data: redactDeep({ text }) };
-    const patch = state.titled ? null : { title: titleOf(ev.data.text) };
-    if (await postEvents(state, [ev], patch)) {
-      state.lastPrompt = text;
-      if (patch) state.titled = true;
-      writeJson(stateFile, state);
+    if (!text.startsWith("/")) {
+      const ev = { ts: new Date().toISOString(), kind: "user", data: redactDeep({ text }) };
+      const patch = state.titled ? null : { title: titleOf(ev.data.text) };
+      if (await postEvents(cfg, state, [ev], patch)) {
+        state.lastPrompt = text;
+        if (patch) state.titled = true;
+        writeJson(stateFile, state);
+      }
     }
   }
 
   if (transcript_path && fs.existsSync(transcript_path)) {
     const { events, offset, patch } = tailTranscript(transcript_path, state.offset || 0, state);
     if (events.length > 0 || patch) {
-      const ok = await postEvents(state, events, patch);
+      const ok = await postEvents(cfg, state, events, patch);
       if (ok) {
         state.offset = offset;
         if (patch?.title) state.titled = true;
@@ -91,16 +123,21 @@ async function main() {
   }
 
   if (hook_event_name === "SessionEnd" && !state.disabled && !state.reset) {
-    await postEvents(state, [{ ts: new Date().toISOString(), kind: "session_end", data: { reason: payload.reason || "end" } }], null);
-    await http("POST", `${BASE}/api/sessions/${state.id}/end`, null, state.token);
-    state.disabled = true;
-    writeJson(stateFile, state);
+    await endSession(cfg, state, stateFile, payload.reason);
   }
+}
+
+export async function endSession(cfg, state, stateFile, reason = "end") {
+  await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_end", data: { reason } }], null);
+  await http("POST", `${cfg.serverUrl}/api/sessions/${state.id}/end`, null, state.token);
+  state.disabled = true;
+  state.endedAt = new Date().toISOString();
+  writeJson(stateFile, state);
 }
 
 // ---------- transcript tailing ----------
 
-function tailTranscript(file, offset, state) {
+function tailTranscript(file, offset, state, { dryRun = false } = {}) {
   const size = fs.statSync(file).size;
   if (size < offset) offset = 0;
   if (size === offset) return { events: [], offset, patch: null };
@@ -115,6 +152,7 @@ function tailTranscript(file, offset, state) {
   if (lastNl === -1) return { events: [], offset, patch: null };
   text = text.slice(0, lastNl + 1);
   const newOffset = offset + Buffer.byteLength(text, "utf8");
+  if (dryRun) return { events: [], offset: newOffset, patch: null };
 
   const events = [];
   let patch = null;
@@ -188,6 +226,9 @@ function cleanUserText(s) {
   return String(s)
     .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, "")
     .replace(/<local-command-stdout>[\s\S]*?<\/local-command-stdout>/g, "")
+    .replace(/<command-name>[\s\S]*?<\/command-name>/g, "")
+    .replace(/<command-message>[\s\S]*?<\/command-message>/g, "")
+    .replace(/<command-args>[\s\S]*?<\/command-args>/g, "")
     .trim();
 }
 
@@ -216,12 +257,12 @@ function clipDeep(v, depth = 0) {
 
 // ---------- network ----------
 
-async function postEvents(state, events, patch) {
+export async function postEvents(cfg, state, events, patch) {
   const total = Math.max(events.length, patch ? 1 : 0);
   for (let i = 0; i < total; i += LIMITS.batch) {
     const body = { events: events.slice(i, i + LIMITS.batch) };
     if (i === 0 && patch) body.meta = patch;
-    const res = await http("POST", `${BASE}/api/sessions/${state.id}/events`, body, state.token);
+    const res = await http("POST", `${cfg.serverUrl}/api/sessions/${state.id}/events`, body, state.token);
     if (res.status === 200) continue;
     if (res.status === 0) { setBackoff(); return false; }
     if (res.status === 404 || res.status === 401) { state.reset = true; return false; }
@@ -231,7 +272,7 @@ async function postEvents(state, events, patch) {
   return true;
 }
 
-async function http(method, url, body, token) {
+export async function http(method, url, body, token) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
@@ -253,7 +294,7 @@ function inBackoff() {
 }
 
 function setBackoff(minutes = 10) {
-  writeJson(BACKOFF_FILE, { until: Date.now() + minutes * 60_000, base: BASE });
+  writeJson(BACKOFF_FILE, { until: Date.now() + minutes * 60_000 });
 }
 
 // ---------- io ----------
@@ -278,12 +319,16 @@ function parse(s) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
-function readJson(file) {
+export function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
 }
 
-function writeJson(file, obj) {
+export function writeJson(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(obj));
   fs.renameSync(tmp, file);
+}
+
+function fileURLToPath_(u) {
+  return decodeURIComponent(new URL(u).pathname);
 }

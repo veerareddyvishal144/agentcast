@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Check, Copy, History, Lock, Radio, ShieldCheck, Sparkles, Timer, Users, Terminal, Link2, Play } from "lucide-react";
+import { ArrowRight, Check, Copy, History, Lock, Radio, Scissors, ShieldCheck, Sparkles, Timer, Users, Terminal, Link2, Play } from "lucide-react";
 import { toast } from "sonner";
 import { Brand } from "@/components/brand";
 import { StatusPill } from "@/components/status-pill";
@@ -61,7 +61,7 @@ function Hero() {
           agentcast streams your Claude Code session to a page anyone can open: prompts, replies, tool calls, diffs and results as they happen. When the session ends, the link becomes a replay.
         </p>
         <div id="install" className="mt-8 scroll-mt-24"><InstallBox /></div>
-        <p className="mt-3 text-xs text-muted-foreground">One command, Node 18+. Nothing to sign up for. Remove it just as easily with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">--uninstall</code>.</p>
+        <p className="mt-3 text-xs text-muted-foreground">One command, Node 18+. Nothing to sign up for. Remove it just as easily with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">--uninstall</code>. Prefer plugins? agentcast also ships as a Claude Code plugin with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">/agentcast:link</code>, <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:title</code>, <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:pause</code> and <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:end</code> commands.</p>
       </div>
       <DemoPlayer />
     </section>
@@ -158,6 +158,7 @@ function Features() {
     { Icon: Lock, title: "Private links", body: "Set a passphrase and viewers must enter it before anything loads. Stored as a salted PBKDF2 hash." },
     { Icon: Sparkles, title: "Titles that read well", body: "When a session ends, a model running on Cloudflare writes a short title and summary, so links look good in Slack and X.", span: "md:col-span-2" },
     { Icon: Timer, title: "24-hour expiry", body: "Sessions delete themselves a day after they start. Nothing is indexed." },
+    { Icon: Scissors, title: "Clips and export", body: "Share just the interesting range with a clip link, or export any view as Markdown or JSON." },
     { Icon: Link2, title: "Deep links", body: "Append #tools to open every tool call expanded. Jump between turns from the outline." },
     { Icon: ShieldCheck, title: "Redaction built in", body: "API keys, tokens, JWTs and private keys are scrubbed on your machine before upload, then again on the server." },
   ];
