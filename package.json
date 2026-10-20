@@ -10,8 +10,9 @@
     "typecheck": "tsc --noEmit",
     "tail": "wrangler tail",
     "sync": "node scripts/sync-dist.mjs",
-    "predev": "npm run sync",
-    "predeploy": "npm run sync"
+    "predev": "npm run build:web && npm run sync",
+    "predeploy": "npm run build:web && npm run sync",
+    "build:web": "npm --prefix web run build"
   },
   "keywords": [],
   "author": "",

@@ -13,8 +13,27 @@ shared/redact.mjs         Secret redaction, used by both the hook and the Worker
 hook/agentcast-hook.mjs   Claude Code hook: tails the transcript and posts events
 hook/install.mjs          Adds/removes the hook in Claude Code settings (global or per project)
 scripts/sync-dist.mjs     Copies hook files into public/dist for the curl installer (runs before dev/deploy)
-public/                   Landing page, viewer (vanilla HTML/CSS/JS), install.sh, og.png
+web/                      Frontend: Vite + React 19 + Tailwind v4 + shadcn/ui (Radix "nova" style)
+  src/pages/landing-app.tsx   Landing page with a self-playing demo session
+  src/pages/viewer-app.tsx    Session viewer: timeline, outline, replay dock, passphrase gate
+  src/hooks/use-session.ts    WebSocket connection, auth handshake, reconnect, event log
+  src/hooks/use-replay.ts     Replay cursor, play/pause, speed
+  src/components/             Timeline, tool cards with diff rendering, markdown, header, dock
+  public/                     install.sh, og.png, favicon (copied into the build)
+public/                   Build output served by the Worker (generated, not committed)
 ```
+
+## Frontend
+
+The UI is a two-page Vite app in `web/` that compiles into `public/`. `npm run dev` and `npm run deploy` at the repo root build it first.
+
+```sh
+cd web && npm install
+npm run build        # or: npm run watch, while wrangler dev runs in another terminal
+npx shadcn@latest add <component>   # add more shadcn components
+```
+
+Dark theme by default with a light toggle, Geist font self-hosted, no runtime CSS-in-JS. The viewer page gets its Open Graph tags injected by the Worker, so the HTML template keeps a plain `<title>` placeholder.
 
 ## Install the hook (users)
 
@@ -38,8 +57,8 @@ Environment variables read by the hook:
 ## Develop
 
 ```sh
-npm install
-npm run dev                                  # http://127.0.0.1:8787, also syncs public/dist
+npm install && (cd web && npm install)
+npm run dev                                  # builds the frontend, syncs public/dist, starts wrangler on :8787
 node hook/install.mjs --url http://127.0.0.1:8787 --project ~/some-repo
 ```
 
