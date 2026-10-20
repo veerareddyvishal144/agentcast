@@ -1,6 +1,6 @@
 # agentcast
 
-Share a live, link-viewable stream of a Claude Code session: prompts, replies, tool calls, diffs and results, as they happen. When the session ends the link becomes a replay with a timeline scrubber. Links expire after 24 hours.
+Share a live, link-viewable stream of a Claude Code session: prompts, replies, tool calls, diffs and results, as they happen. When the session ends the link becomes a replay with a timeline scrubber. Links expire after 24 hours by default (see [Link expiration](#link-expiration)).
 
 Runs on Cloudflare Workers: one Worker, one Durable Object per session, Workers AI for titles, static assets for the viewer. No database to run. Production: https://agentcast.agentcast.workers.dev
 
@@ -100,6 +100,39 @@ npm run deploy
 
 Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a rate limiter (20 session creations per IP per minute), and vars for TTL, event cap, AI model, and public URL.
 
+## Link expiration
+
+Every session link has a fixed lifetime, counted from the moment the session **starts**, not from when it ends. The default is 24 hours.
+
+**What happens at expiry.** A Durable Object alarm fires, sends every connected viewer an `expired` message and closes their sockets, then deletes the session's storage. From then on the API returns 404 and the page shows "This session is gone." Ending a session early with `/agentcast:end` does not shorten this; the replay stays available until the expiry time.
+
+**Where the value lives.** The lifetime is the `SESSION_TTL_HOURS` variable in `wrangler.jsonc`:
+
+```jsonc
+"vars": {
+  "SESSION_TTL_HOURS": "24",
+  ...
+}
+```
+
+It is read once when a session is created and stored on the session as `expiresAt`, so changing it affects only sessions created after the change. Existing sessions keep the expiry they were given.
+
+**How to change it.**
+
+| Where | How |
+|---|---|
+| Production, permanently | Edit the value in `wrangler.jsonc` and run `npm run deploy` |
+| Production, one deploy | `npx wrangler deploy --var SESSION_TTL_HOURS:72` |
+| Local development | Create `.dev.vars` containing `SESSION_TTL_HOURS=1` (the file is gitignored), or run `npx wrangler dev --var SESSION_TTL_HOURS:1` |
+
+Fractional hours work (`"0.5"` is 30 minutes). Values set in the Cloudflare dashboard are overwritten on the next deploy unless `keep_vars` is set in the config, so prefer the config file.
+
+**Seeing a session's expiry.** `GET /api/sessions/:id/meta` returns `expiresAt`; the viewer sidebar shows it under "Session"; `node plugin/bin/agentcast.mjs status` prints it.
+
+**Storage implications.** Longer lifetimes keep more sessions on disk at once. A typical session is 50 KB to 2 MB of SQLite storage. The Workers free plan allows 5 GB in total across all Durable Objects, so a 7-day lifetime is comfortable for personal use; a 30-day lifetime at team scale calls for the paid plan or the R2 archival item on the roadmap.
+
+**Not available yet.** Per-session or per-user lifetimes, and deleting a session before it expires. Both are straightforward additions: a `ttl_hours` field on session creation, capped by the server setting, and a token-protected `DELETE /api/sessions/:id`.
+
 ## API
 
 | Method | Path | Auth | Purpose |
@@ -123,7 +156,7 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 - Subagent (sidechain) lines and injected system reminders are dropped.
 - Common secret formats are redacted on the sender's machine before upload, and again in the Worker.
 - Only the project directory name is sent, not the full path.
-- Viewer pages carry `noindex`. Links expire after 24 hours and the Durable Object deletes its storage.
+- Viewer pages carry `noindex`. Links expire after `SESSION_TTL_HOURS` (default 24) and the Durable Object deletes its storage. See [Link expiration](#link-expiration).
 - Passphrases are stored as PBKDF2-SHA256 hashes with a per-session salt.
 - The AI summary runs on Workers AI inside Cloudflare, over already-redacted text, and can be disabled per session.
 - If the server is unreachable the hook backs off for 10 minutes so it never slows Claude Code.
