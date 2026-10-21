@@ -8,7 +8,7 @@ Runs on Cloudflare Workers: one Worker, one Durable Object per session, Workers 
 
 ```
 src/index.ts              Worker: HTTP API, viewer route with link-preview tags, rate limiting, static assets
-src/session.ts            SessionDO: per-session event log (SQLite), WebSocket fan-out, passphrase auth, rename, keep/delete, incremental Vectorize indexing, ask, AI summary, expiry alarm
+src/session.ts            SessionDO: per-session event log (SQLite), WebSocket fan-out, passphrase auth, rename, keep/delete, Vectorize indexing, ask, AI summary, R2 archive/evict/rehydrate, expiry alarm
 plugin/                   Claude Code plugin (also the canonical home of the hook)
   .claude-plugin/plugin.json  Manifest with userConfig (server_url, passphrase, ai_summary, enabled)
   hooks/hooks.json            SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd
@@ -22,7 +22,8 @@ plugin/                   Claude Code plugin (also the canonical home of the hoo
 scripts/sync-dist.mjs     Copies plugin hook files into public/dist for the curl installer (runs before dev/deploy)
 web/                      Frontend: Vite + React 19 + Tailwind v4 + shadcn/ui (Radix "nova" style)
   src/pages/landing-app.tsx   Landing page with a self-playing demo session
-  src/pages/viewer-app.tsx    Session viewer: timeline, outline, replay dock, passphrase gate
+  src/pages/viewer-app.tsx    Session viewer: transcript, outline, replay dock, ask panel, passphrase gate
+  src/pages/standalone-app.tsx  Offline replay used by the single-file HTML export (vite.standalone.config.ts)
   src/hooks/use-session.ts    WebSocket connection, auth handshake, reconnect, event log
   src/hooks/use-replay.ts     Replay cursor, play/pause, speed
   src/components/             Timeline, tool cards with diff rendering, markdown, header, dock
@@ -80,7 +81,7 @@ Environment variables read by the hook (plugin settings take precedence):
 - Live stream with reconnect, turn outline, collapsible tool cards with diff rendering.
 - Replay dock on ended sessions: play, step, scrub, 1× to 8× speed. Keyboard: Space, ←, →, Home, End.
 - **Clips**: press the scissors (or `C`) in the dock, pick a range, copy the link. Clip links look like `/s/<id>?from=<seq>&to=<seq>` and get their own link preview.
-- **Export**: download the current view (full session or clip) as Markdown or JSON, or copy Markdown to the clipboard.
+- **Export**: download the current view (full session or clip) as Markdown or JSON, copy Markdown to the clipboard, or download a **standalone HTML** file: the whole viewer with the session inlined, about 750 KB, which opens offline from any disk or static host with replay and outline intact.
 - **Rename**: `/agentcast:title <name>` or `PATCH /api/sessions/:id` with the writer token. A manual title is locked so the AI summary does not replace it.
 - **Ask the session**: a question box (header button, sidebar input, or `?ask=<question>` in the URL). Answers come only from this session's events and cite them; clicking a citation jumps to the event. Retrieval is hybrid: Vectorize semantic search over events indexed incrementally during the session, plus keyword and recency matches, so it works on live sessions too. Protected sessions require the passphrase; sessions with AI off have no question box.
 - **Keep and delete**: `/agentcast:keep` makes a link permanent, `/agentcast:unkeep` restores the expiry, `/agentcast:delete` removes the session for everyone immediately (asks for confirmation).
@@ -101,7 +102,7 @@ npx wrangler login
 npm run deploy
 ```
 
-Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a Vectorize index (`agentcast-sessions`, 384 dimensions, cosine; create it once with `npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine`), two rate limiters (20 session creations and 30 questions per IP per minute), and vars for TTL, max TTL, event cap, and the answer and embedding models.
+Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a Vectorize index (`agentcast-sessions`, 384 dimensions, cosine; create it once with `npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine`), an R2 bucket (`agentcast-archive`) for kept sessions, two rate limiters (20 session creations and 30 questions per IP per minute), and vars for TTL, max TTL, archive eviction delay, event cap, and the answer and embedding models.
 
 ## Session lifecycle
 
@@ -154,7 +155,9 @@ Fractional hours work (`"0.5"` is 30 minutes). Values set in the Cloudflare dash
 
 **Per-session lifetime.** The plugin setting `retention` (or `AGENTCAST_RETENTION`) sends a `ttlHours` or `keep` flag when the session is created. Hours are capped by `MAX_TTL_HOURS` (default 8760, one year); `forever` creates a kept session with no expiry.
 
-**Keeping and deleting.** `/agentcast:keep` (`POST /api/sessions/:id/keep` with the writer token) removes the expiry from an existing session; `/agentcast:unkeep` restores it, with at least an hour of grace. `/agentcast:delete` (`DELETE /api/sessions/:id`) removes the session, its events, and its search index immediately. Kept sessions count toward Durable Object storage: a typical session is 50 KB to 2 MB, against 5 GB on the free plan.
+**Keeping and deleting.** `/agentcast:keep` (`POST /api/sessions/:id/keep` with the writer token) removes the expiry from an existing session; `/agentcast:unkeep` restores it, with at least an hour of grace. `/agentcast:delete` (`DELETE /api/sessions/:id`) removes the session, its events, its archive, and its search index immediately.
+
+**Where kept sessions live (R2 archival).** A kept session that has ended is written to the `agentcast-archive` R2 bucket once its summary and indexing are done: `sessions/<id>/meta.json` (metadata plus the private token and passphrase hashes) and `sessions/<id>/events.json`. After `ARCHIVE_EVICT_HOURS` (default 24) without a visit, the Durable Object drops its local copy and keeps only a pointer. The next visit rehydrates from R2 transparently, so links, replay, export and the question box keep working; vectors stay in Vectorize throughout. Live sessions and sessions with an expiry are never archived. R2 costs about 1.5¢ per GB-month with 10 GB free, versus about 20¢ per GB-month for Durable Object storage. Create the bucket once with `npx wrangler r2 bucket create agentcast-archive`.
 
 ## API
 
@@ -167,6 +170,7 @@ Fractional hours work (`"0.5"` is 30 minutes). Values set in the Cloudflare dash
 | POST | `/api/sessions/:id/keep` | Bearer token | `{ kept: true|false }`. Keep forever or restore the expiry |
 | DELETE | `/api/sessions/:id` | Bearer token | Delete the session, its events and its vectors now |
 | POST | `/api/sessions/:id/ask` | viewer key if protected, rate limited | `{ question }` → `{ answer, citations: [{ seq, kind, label, ts }], indexed }` |
+| GET | `/api/sessions/:id/export.html` | viewer key if protected | Standalone single-file HTML replay (download) |
 | GET | `/api/sessions/:id/meta` | viewer key if protected | `{ meta, authorized }`. Unauthorized viewers get a stripped meta |
 | GET | `/api/sessions/:id?after=N` | viewer key if protected | Metadata plus events after sequence N |
 | GET | `/api/sessions/:id/ws?after=N` | see below | WebSocket stream |
@@ -195,4 +199,4 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 
 ## Not yet built
 
-Accounts (needs an identity provider decision), R2 archival as a cheaper tier for kept sessions, standalone HTML export, comments, approval mode, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace.
+Accounts (needs an identity provider decision), comments, approval mode, inactivity auto-end for crashed sessions, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace.

@@ -110,14 +110,23 @@ export function ViewerApp() {
     catch { toast.message("Clip created", { description: "Copy the address bar to share it." }); }
   }, [setClip]);
 
-  const onExport = useCallback(async (kind: "md" | "md-copy" | "json") => {
+  const onExport = useCallback(async (kind: "md" | "md-copy" | "json" | "html") => {
     if (!s.meta) return;
     const url = location.href.split("#")[0];
+    if (kind === "html") {
+      const key = sessionStorage.getItem(`agentcast:key:${id}`);
+      toast.message("Preparing standalone file…");
+      const res = await fetch(`/api/sessions/${id}/export.html`, { headers: key ? { "x-agentcast-key": key } : {} });
+      if (!res.ok) { toast.error("Could not export"); return; }
+      downloadText(exportFilename(s.meta, "html", false), await res.text(), "text/html");
+      toast.success("Standalone HTML downloaded", { description: "Opens offline, replay included." });
+      return;
+    }
     if (kind === "json") { downloadText(exportFilename(s.meta, "json", !!clip), sessionJson(s.meta, baseEvents), "application/json"); toast.success("JSON downloaded"); return; }
     const md = sessionMarkdown(s.meta, baseEvents, allResults, url, !!clip);
     if (kind === "md") { downloadText(exportFilename(s.meta, "md", !!clip), md, "text/markdown"); toast.success("Markdown downloaded"); }
     else { try { await navigator.clipboard.writeText(md); toast.success("Markdown copied"); } catch { toast.error("Could not copy"); } }
-  }, [s.meta, baseEvents, allResults, clip]);
+  }, [s.meta, baseEvents, allResults, clip, id]);
 
   return (
     <TooltipProvider>

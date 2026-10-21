@@ -18,9 +18,10 @@ type Props = {
   ended: boolean;
   onPreviewRange: (r: Range | null) => void;
   onCreateClip: (r: Range) => void;
+  canClip?: boolean;
 };
 
-export function ReplayDock({ replay, events, ended, onPreviewRange, onCreateClip }: Props) {
+export function ReplayDock({ replay, events, ended, onPreviewRange, onCreateClip, canClip = true }: Props) {
   const { idx, total, playing, speed, setSpeed, seek, step, toggle, live, scrubbed } = replay;
   const current = idx > 0 ? events[idx - 1] : null;
   const [clipping, setClipping] = useState(false);
@@ -50,7 +51,7 @@ export function ReplayDock({ replay, events, ended, onPreviewRange, onCreateClip
       else if (e.key === "ArrowRight") step(1);
       else if (e.key === "Home") seek(0);
       else if (e.key === "End") seek(total);
-      else if (e.key.toLowerCase() === "c" && total > 1) startClip();
+      else if (e.key.toLowerCase() === "c" && total > 1 && canClip) startClip();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -85,7 +86,7 @@ export function ReplayDock({ replay, events, ended, onPreviewRange, onCreateClip
             {(scrubbed || !ended) && (
               <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={live} aria-label="Show everything"><Radio className="text-live" /></Button></TooltipTrigger><TooltipContent>Show everything <KbdGroup><Kbd>End</Kbd></KbdGroup></TooltipContent></Tooltip>
             )}
-            {total > 1 && (
+            {total > 1 && canClip && (
               <Tooltip><TooltipTrigger asChild><Button size="icon-sm" variant="ghost" onClick={startClip} aria-label="Create a clip"><Scissors /></Button></TooltipTrigger><TooltipContent>Create a clip <Kbd>C</Kbd></TooltipContent></Tooltip>
             )}
           </>

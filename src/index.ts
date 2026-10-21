@@ -1,4 +1,4 @@
-import { SessionDO, type Env, type IncomingEvent, type Meta, type MetaPatch, type PublicMeta, type Result } from "./session";
+import { SessionDO, type Env, type IncomingEvent, type Meta, type MetaPatch, type PublicMeta, type Result, type StoredEvent } from "./session";
 
 export { SessionDO };
 
@@ -135,6 +135,27 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     if (tooLarge(req)) return json({ error: "body too large" }, 413);
     const body = (await readJson(req)) as { title?: unknown } | null;
     return fromResult(await stub.rename(bearer(req), body?.title));
+  }
+
+  if (sub === "export.html" && req.method === "GET") {
+    // Standalone, self-contained replay: the single-file viewer build with the session data inlined.
+    type State = Result<{ meta: Meta; events: StoredEvent[]; viewers: number }>;
+    const first = (await stub.getState(0, 5000, key)) as State;
+    if (!first.ok) return fromResult(first);
+    const events = [...first.value.events];
+    while (events.length && events.length % 5000 === 0) {
+      const more = (await stub.getState(events[events.length - 1].seq, 5000, key)) as State;
+      if (!more.ok || more.value.events.length === 0) break;
+      events.push(...more.value.events);
+    }
+    const tpl = await env.ASSETS.fetch(new Request(new URL("/standalone.html", url).toString()));
+    if (!tpl.ok) return json({ error: "standalone template missing" }, 500);
+    const payload = JSON.stringify({ exportedAt: new Date().toISOString(), url: `${url.origin}/s/${id}`, meta: first.value.meta, events }).replace(/</g, "\\u003c");
+    const html = (await tpl.text()).replace("__AGENTCAST_DATA__", () => payload);
+    const slug = (first.value.meta.title || "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "session";
+    return new Response(html, {
+      headers: { "content-type": "text/html; charset=utf-8", "content-disposition": `attachment; filename="agentcast-${slug}-${id}.html"`, "cache-control": "no-store", ...CORS },
+    });
   }
 
   if (sub === "meta" && req.method === "GET") {

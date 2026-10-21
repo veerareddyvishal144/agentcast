@@ -6,6 +6,8 @@ export interface Env {
   ASSETS: Fetcher;
   AI?: Ai;
   VECTORS?: VectorizeIndex;
+  ARCHIVE?: R2Bucket;
+  ARCHIVE_EVICT_HOURS: string;
   CREATE_LIMITER?: RateLimit;
   ASK_LIMITER?: RateLimit;
   SESSION_TTL_HOURS: string;
@@ -45,6 +47,8 @@ export type Answer = { answer: string; citations: Citation[]; indexed: boolean }
 
 type Attachment = { authed: boolean };
 type Row = { seq: number; ts: string; kind: string; data: string };
+/** What gets written to R2 for a kept session. Private fields never leave the server. */
+type ArchivePack = { version: 1; meta: Meta; tokenHash: string; viewSalt?: string; viewHash?: string; indexedUpTo: number; ttlHours: number; archivedAt: string };
 
 const KINDS = new Set(["session_start", "user", "assistant_text", "tool_use", "tool_result", "session_end", "notice"]);
 const INDEXABLE = new Set(["user", "assistant_text", "tool_use"]);
@@ -56,6 +60,8 @@ const STOPWORDS = new Set("the a an and or of to in on for with is are was were 
 
 export class SessionDO extends DurableObject<Env> {
   private sql: SqlStorage;
+  private archiveChecked = false;                       // avoid re-checking R2 for sessions that do not exist
+  private rehydrating: Promise<Meta | undefined> | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -105,6 +111,7 @@ export class SessionDO extends DurableObject<Env> {
       toStore.viewHash = await pbkdf2(input.passphrase, salt);
     }
     await this.ctx.storage.put(toStore);
+    this.archiveChecked = true;
     await this.scheduleAlarm(meta);
     return { ok: true, value: meta };
   }
@@ -173,7 +180,7 @@ export class SessionDO extends DurableObject<Env> {
     if (!meta.endedAt) {
       meta.endedAt = new Date().toISOString();
       meta.updatedAt = meta.endedAt;
-      await this.ctx.storage.put("meta", meta);
+      await this.saveMeta(meta);
       this.broadcast({ type: "meta", meta });
       if (meta.ai) {
         await this.ctx.storage.put({ summaryPending: 0, summaryAt: Date.now() + 500, indexAt: Date.now() + 500 });
@@ -212,7 +219,8 @@ export class SessionDO extends DurableObject<Env> {
       meta.expiresAt = new Date(Math.max(natural, Date.now() + 3_600_000)).toISOString(); // at least an hour of grace
     }
     meta.updatedAt = new Date().toISOString();
-    await this.ctx.storage.put("meta", meta);
+    if (!kept) await this.ctx.storage.delete("evictAt"); // sessions with an expiry are never evicted to R2
+    await this.saveMeta(meta);
     this.broadcast({ type: "meta", meta });
     await this.scheduleAlarm(meta);
     return { ok: true, value: meta };
@@ -232,6 +240,7 @@ export class SessionDO extends DurableObject<Env> {
   async getMeta(key: string | null): Promise<Result<{ meta: Meta | PublicMeta; authorized: boolean }>> {
     const meta = await this.meta();
     if (!meta) return { ok: false, status: 404, error: "no such session" };
+    await this.touch(meta);
     const authorized = await this.authorizedViewer(meta, key);
     return { ok: true, value: { meta: authorized ? meta : publicMeta(meta), authorized } };
   }
@@ -240,6 +249,7 @@ export class SessionDO extends DurableObject<Env> {
     const meta = await this.meta();
     if (!meta) return { ok: false, status: 404, error: "no such session" };
     if (!(await this.authorizedViewer(meta, key))) return { ok: false, status: 401, error: "passphrase required" };
+    await this.touch(meta);
     const events = this.readEvents(after, Math.min(Math.max(limit, 1), 5000));
     return { ok: true, value: { meta, events, viewers: this.viewerCount() } };
   }
@@ -251,6 +261,7 @@ export class SessionDO extends DurableObject<Env> {
     if (!meta) return { ok: false, status: 404, error: "no such session" };
     if (!(await this.authorizedViewer(meta, key))) return { ok: false, status: 401, error: "passphrase required" };
     if (!meta.ai || !this.env.AI) return { ok: false, status: 400, error: "AI features are off for this session" };
+    await this.touch(meta);
     const q = typeof question === "string" ? question.replace(/\s+/g, " ").trim() : "";
     if (q.length < 3 || q.length > 500) return { ok: false, status: 400, error: "question must be 3 to 500 characters" };
     if (meta.eventCount === 0) return { ok: false, status: 400, error: "nothing has happened in this session yet" };
@@ -339,6 +350,7 @@ QUESTION: ${q}`;
     if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return new Response("expected websocket", { status: 426 });
     const meta = await this.meta();
     if (!meta) return new Response("no such session", { status: 404 });
+    await this.touch(meta);
 
     const after = Number(new URL(req.url).searchParams.get("after") || "0") || 0;
     const pair = new WebSocketPair();
@@ -427,6 +439,19 @@ QUESTION: ${q}`;
       await this.wipe(fresh, "expired");
       return;
     }
+
+    // Kept and finished: archive to R2 once all post-session work is done, then evict the local copy after a quiet day.
+    if (fresh.kept && fresh.endedAt && this.env.ARCHIVE) {
+      const busy = (await this.ctx.storage.get("indexAt")) !== undefined || (await this.ctx.storage.get("summaryAt")) !== undefined;
+      if (!busy && !(await this.ctx.storage.get("archivedAt"))) {
+        try { await this.archive(fresh); } catch (err) { console.error("agentcast archive failed", fresh.id, String(err)); await this.ctx.storage.put("archiveRetryAt", Date.now() + 300_000); }
+      }
+      const evictAt = await this.ctx.storage.get<number>("evictAt");
+      if (evictAt !== undefined && now >= evictAt - 1_000) {
+        if (this.ctx.getWebSockets().length === 0) { await this.evict(); return; }
+        await this.ctx.storage.put("evictAt", now + this.evictMs() / 4); // someone is watching; check back later
+      }
+    }
     await this.scheduleAlarm(fresh);
   }
 
@@ -438,8 +463,103 @@ QUESTION: ${q}`;
     if (indexAt !== undefined) times.push(indexAt);
     if (summaryAt !== undefined) times.push(summaryAt);
     if (!meta.kept && meta.expiresAt) times.push(Date.parse(meta.expiresAt));
+    if (meta.kept && meta.endedAt && this.env.ARCHIVE) {
+      const archivedAt = await this.ctx.storage.get("archivedAt");
+      const retryAt = await this.ctx.storage.get<number>("archiveRetryAt");
+      if (!archivedAt && indexAt === undefined && summaryAt === undefined) times.push(retryAt ?? Date.now() + 1_000);
+      const evictAt = await this.ctx.storage.get<number>("evictAt");
+      if (archivedAt && evictAt !== undefined) times.push(evictAt);
+    }
     if (times.length) await this.ctx.storage.setAlarm(Math.min(...times));
     else await this.ctx.storage.deleteAlarm();
+  }
+
+  // ---------- R2 archive: write, evict local copy, rehydrate on demand ----------
+
+  private evictMs(): number {
+    return Math.max(0.001, Number(this.env.ARCHIVE_EVICT_HOURS || "24")) * 3_600_000;
+  }
+
+  private async archive(meta: Meta) {
+    const bucket = this.env.ARCHIVE!;
+    const pack: ArchivePack = {
+      version: 1,
+      meta,
+      tokenHash: (await this.ctx.storage.get<string>("tokenHash")) ?? "",
+      viewSalt: await this.ctx.storage.get<string>("viewSalt"),
+      viewHash: await this.ctx.storage.get<string>("viewHash"),
+      indexedUpTo: (await this.ctx.storage.get<number>("indexedUpTo")) ?? 0,
+      ttlHours: (await this.ctx.storage.get<number>("ttlHours")) ?? Number(this.env.SESSION_TTL_HOURS || "24"),
+      archivedAt: new Date().toISOString(),
+    };
+    const events: StoredEvent[] = [];
+    for (let cursor = 0; ; ) {
+      const batch = this.readEvents(cursor, 2000);
+      if (batch.length === 0) break;
+      events.push(...batch);
+      cursor = batch[batch.length - 1].seq;
+      if (batch.length < 2000) break;
+    }
+    await bucket.put(`sessions/${meta.id}/events.json`, JSON.stringify(events), { httpMetadata: { contentType: "application/json" } });
+    await bucket.put(`sessions/${meta.id}/meta.json`, JSON.stringify(pack), { httpMetadata: { contentType: "application/json" } });
+    await this.ctx.storage.put({ archivedAt: pack.archivedAt, archivedId: meta.id, evictAt: Date.now() + this.evictMs() });
+    await this.ctx.storage.delete("archiveRetryAt");
+    console.log("agentcast archive: wrote", meta.id, `${events.length} events`);
+  }
+
+  /** Drops the local copy of an archived session, keeping only a pointer so the next visit can rehydrate. */
+  private async evict() {
+    this.sql.exec("DELETE FROM events");
+    const keys = [...(await this.ctx.storage.list()).keys()].filter((k) => k !== "archivedId");
+    if (keys.length) await this.ctx.storage.delete(keys);
+    await this.ctx.storage.deleteAlarm();
+    this.archiveChecked = false;
+    console.log("agentcast archive: evicted local copy", await this.ctx.storage.get("archivedId"));
+  }
+
+  private async rehydrate(): Promise<Meta | undefined> {
+    const bucket = this.env.ARCHIVE;
+    const id = await this.ctx.storage.get<string>("archivedId");
+    if (!bucket || !id) return undefined;
+    const metaObj = await bucket.get(`sessions/${id}/meta.json`);
+    if (!metaObj) return undefined;
+    const pack = (await metaObj.json()) as ArchivePack;
+    const evObj = await bucket.get(`sessions/${id}/events.json`);
+    const events = evObj ? ((await evObj.json()) as StoredEvent[]) : [];
+    this.sql.exec("DELETE FROM events");
+    for (let i = 0; i < events.length; i += 500) {
+      const chunk = events.slice(i, i + 500);
+      const placeholders = chunk.map(() => "(?, ?, ?, ?)").join(",");
+      const params = chunk.flatMap((e) => [e.seq, e.ts, e.kind, JSON.stringify(e.data ?? null)]);
+      this.sql.exec(`INSERT OR REPLACE INTO events (seq, ts, kind, data) VALUES ${placeholders}`, ...params);
+    }
+    const toStore: Record<string, unknown> = { meta: pack.meta, tokenHash: pack.tokenHash, indexedUpTo: pack.indexedUpTo, ttlHours: pack.ttlHours, archivedAt: pack.archivedAt, evictAt: Date.now() + this.evictMs() };
+    if (pack.viewSalt) toStore.viewSalt = pack.viewSalt;
+    if (pack.viewHash) toStore.viewHash = pack.viewHash;
+    await this.ctx.storage.put(toStore);
+    await this.scheduleAlarm(pack.meta);
+    console.log("agentcast archive: rehydrated", id, `${events.length} events`);
+    return pack.meta;
+  }
+
+  /** A viewer touched an archived session: push eviction out again. */
+  private async touch(meta: Meta) {
+    if (!(await this.ctx.storage.get("archivedAt"))) return;
+    await this.ctx.storage.put("evictAt", Date.now() + this.evictMs());
+    await this.scheduleAlarm(meta);
+  }
+
+  /** Writes meta locally and, if the session is archived, refreshes the archive's copy too. */
+  private async saveMeta(meta: Meta) {
+    await this.ctx.storage.put("meta", meta);
+    if (this.env.ARCHIVE && (await this.ctx.storage.get("archivedAt"))) {
+      const obj = await this.env.ARCHIVE.get(`sessions/${meta.id}/meta.json`);
+      if (obj) {
+        const pack = (await obj.json()) as ArchivePack;
+        pack.meta = meta;
+        await this.env.ARCHIVE.put(`sessions/${meta.id}/meta.json`, JSON.stringify(pack), { httpMetadata: { contentType: "application/json" } });
+      }
+    }
   }
 
   private async wipe(meta: Meta, reason: "expired" | "deleted") {
@@ -448,8 +568,12 @@ QUESTION: ${q}`;
       try { ws.send(msg); ws.close(1001, `session ${reason}`); } catch {}
     }
     await this.deleteVectors(meta);
+    if (this.env.ARCHIVE) {
+      try { await this.env.ARCHIVE.delete([`sessions/${meta.id}/meta.json`, `sessions/${meta.id}/events.json`]); } catch (err) { console.error("agentcast: archive delete failed", meta.id, String(err)); }
+    }
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
+    this.archiveChecked = true;
   }
 
   // ---------- indexing ----------
@@ -574,7 +698,7 @@ ${lines.join("\n")}`;
     if (typeof parsed.summary === "string" && parsed.summary.trim().length >= 8) { fresh.summary = clip(redactText(parsed.summary.trim()), 300); changed = true; }
     if (changed) {
       fresh.updatedAt = new Date().toISOString();
-      await this.ctx.storage.put("meta", fresh);
+      await this.saveMeta(fresh);
       this.broadcast({ type: "meta", meta: fresh });
     }
   }
@@ -583,8 +707,17 @@ ${lines.join("\n")}`;
 
   private async meta(): Promise<Meta | undefined> {
     const m = await this.ctx.storage.get<Meta>("meta");
-    if (m && m.kept === undefined) { m.kept = false; } // sessions created before "keep" existed
-    return m;
+    if (m) {
+      if (m.kept === undefined) m.kept = false; // sessions created before "keep" existed
+      return m;
+    }
+    if (!this.env.ARCHIVE || this.archiveChecked) return undefined;
+    if (!this.rehydrating) {
+      this.rehydrating = this.rehydrate()
+        .catch((err) => { console.error("agentcast rehydrate failed", String(err)); return undefined; })
+        .finally(() => { this.archiveChecked = true; this.rehydrating = null; });
+    }
+    return this.rehydrating;
   }
 
   private async authorizedWriter(token: string | null): Promise<boolean> {

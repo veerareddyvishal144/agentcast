@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, Copy, Download, FileJson, FileText, List, MessageCircleQuestion, PanelsTopLeft } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, FileCode, FileJson, FileText, List, MessageCircleQuestion, PanelsTopLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -18,7 +18,7 @@ type Props = {
   showTitle: boolean;                 // true once the document header has scrolled away
   toolsOpen: boolean | null;
   onToggleTools: () => void;
-  onExport: (kind: "md" | "md-copy" | "json") => void;
+  onExport: (kind: "md" | "md-copy" | "json" | "html") => void;
   canExport: boolean;
   onAsk: () => void;
   canAsk: boolean;
@@ -63,6 +63,7 @@ export function SessionHeader({ meta, events, hiddenAfter, showTitle, toolsOpen,
               <DropdownMenuItem onClick={() => onExport("md-copy")}><Copy /> Copy as Markdown</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onExport("json")}><FileJson /> Download JSON</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExport("html")}><FileCode /> Download standalone HTML</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button variant="outline" size="sm" onClick={copy} className="gap-1.5">{copied ? <Check className="text-live" /> : <Copy />}<span className="hidden sm:inline">{copied ? "Copied" : "Copy link"}</span></Button>
