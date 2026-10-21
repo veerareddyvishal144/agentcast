@@ -30,6 +30,7 @@ export function ViewerApp() {
   const [askOpen, setAskOpen] = useState(() => new URLSearchParams(location.search).has("ask"));
   const [askInitial, setAskInitial] = useState<string | null>(() => new URLSearchParams(location.search).get("ask"));
   const canAsk = !!s.meta && s.meta.ai !== false && s.events.length > 0 && s.status !== "gone" && s.status !== "expired";
+  const askLoading = !canAsk && s.status !== "gone" && s.status !== "expired" && (!s.meta || s.events.length === 0) && s.meta?.ai !== false;
   const openAsk = useCallback((q?: string) => { if (q) setAskInitial(q); setAskOpen(true); }, []);
   const ask = useCallback(async (q: string): Promise<Answer> => {
     const key = sessionStorage.getItem(`agentcast:key:${id}`);
@@ -153,7 +154,7 @@ export function ViewerApp() {
           <Button onClick={jump} size="sm" className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full shadow-lg"><ArrowDown /> New events</Button>
         )}
         {ended && baseEvents.length > 0 && <ReplayDock replay={replay} events={baseEvents} ended={ended} onPreviewRange={setPreview} onCreateClip={onCreateClip} />}
-        <AskPanel open={askOpen} onOpenChange={setAskOpen} initialQuestion={askInitial} ask={ask} enabled={canAsk} />
+        <AskPanel open={askOpen} onOpenChange={setAskOpen} initialQuestion={askInitial} ask={ask} enabled={canAsk} loading={askLoading} />
         <GateDialog open={s.needsKey} error={s.gateError} onSubmit={s.submitKey} />
         <Toaster position="bottom-right" />
       </div>

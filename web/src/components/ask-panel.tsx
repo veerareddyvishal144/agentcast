@@ -16,6 +16,7 @@ type Props = {
   initialQuestion?: string | null;
   ask: (q: string) => Promise<Answer>;
   enabled: boolean;
+  loading: boolean;   // session not loaded yet: show a waiting state rather than "AI is off"
 };
 
 /** Scroll to an event and flash it. */
@@ -27,7 +28,7 @@ export function jumpTo(seq: number) {
   setTimeout(() => el.classList.remove("flash"), 1700);
 }
 
-export function AskPanel({ open, onOpenChange, initialQuestion, ask, enabled }: Props) {
+export function AskPanel({ open, onOpenChange, initialQuestion, ask, enabled, loading }: Props) {
   const [items, setItems] = useState<QA[]>([]);
   const [value, setValue] = useState("");
   const asked = useRef<string | null>(null);
@@ -60,7 +61,8 @@ export function AskPanel({ open, onOpenChange, initialQuestion, ask, enabled }: 
           <SheetDescription>Answers come only from what happened here and cite the events they rely on.</SheetDescription>
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {!enabled && <p className="text-sm text-muted-foreground">AI features are turned off for this session.</p>}
+          {!enabled && loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" /> Loading the session…</p>}
+          {!enabled && !loading && <p className="text-sm text-muted-foreground">AI features are turned off for this session.</p>}
           {enabled && items.length === 0 && (
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>Try one of these:</p>
@@ -85,7 +87,7 @@ export function AskPanel({ open, onOpenChange, initialQuestion, ask, enabled }: 
           className="flex items-center gap-2 border-t px-4 py-3"
           onSubmit={(e) => { e.preventDefault(); void submit(value); }}
         >
-          <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={enabled ? "Ask about this session…" : "Unavailable"} disabled={!enabled} autoFocus maxLength={500} />
+          <Input value={value} onChange={(e) => setValue(e.target.value)} placeholder={enabled ? "Ask about this session…" : loading ? "Loading…" : "Unavailable"} disabled={!enabled} autoFocus maxLength={500} />
           <Button type="submit" size="icon" disabled={!enabled || !value.trim()} aria-label="Ask"><ArrowUp /></Button>
         </form>
       </SheetContent>
