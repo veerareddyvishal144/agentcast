@@ -146,7 +146,7 @@ export function ViewerApp() {
             </div>
           </main>
           <aside className="hidden w-[220px] shrink-0 lg:block">
-            <div className="sticky top-20"><Outline events={baseEvents} hiddenAfter={hiddenAfter} meta={s.meta} onAsk={(q) => openAsk(q)} canAsk={canAsk} /></div>
+            <div className="sticky top-20"><Outline events={baseEvents} hiddenAfter={hiddenAfter} meta={s.meta} onAsk={(q) => openAsk(q)} canAsk={canAsk} askLoading={askLoading} /></div>
           </aside>
         </div>
 

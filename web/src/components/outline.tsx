@@ -7,10 +7,10 @@ import { sessionStats } from "@/lib/turns";
 import { cn } from "@/lib/utils";
 import type { Meta, StoredEvent } from "@/lib/types";
 
-type Props = { events: StoredEvent[]; hiddenAfter: number; meta: Meta | null; onJump?: () => void; className?: string; onAsk?: (q: string) => void; canAsk?: boolean };
+type Props = { events: StoredEvent[]; hiddenAfter: number; meta: Meta | null; onJump?: () => void; className?: string; onAsk?: (q: string) => void; canAsk?: boolean; askLoading?: boolean };
 
 /** Sidebar: turn outline, a few numbers, and the fine print. */
-export function Outline({ events, hiddenAfter, meta, onJump, className, onAsk, canAsk }: Props) {
+export function Outline({ events, hiddenAfter, meta, onJump, className, onAsk, canAsk, askLoading }: Props) {
   const turns = events.filter((e) => e.kind === "user");
   const stats = sessionStats(events);
   const [q, setQ] = useState("");
@@ -20,7 +20,7 @@ export function Outline({ events, hiddenAfter, meta, onJump, className, onAsk, c
         <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (q.trim() && canAsk) { onAsk(q.trim()); setQ(""); } }}>
           <div className="relative flex-1">
             <MessageCircleQuestion className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={canAsk ? "Ask this session…" : "AI is off for this session"} disabled={!canAsk} className="h-8 pl-8 text-[13px]" maxLength={500} />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={canAsk ? "Ask this session…" : askLoading ? "Loading…" : "AI is off for this session"} disabled={!canAsk} className="h-8 pl-8 text-[13px]" maxLength={500} />
           </div>
           <Button type="submit" size="icon-sm" variant="outline" disabled={!canAsk || !q.trim()} aria-label="Ask"><ArrowUp /></Button>
         </form>
