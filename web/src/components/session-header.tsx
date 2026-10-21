@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, Copy, Download, FileJson, FileText, List, PanelsTopLeft } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, FileJson, FileText, List, MessageCircleQuestion, PanelsTopLeft } from "lucide-react";
 import { toast } from "sonner";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -20,10 +20,12 @@ type Props = {
   onToggleTools: () => void;
   onExport: (kind: "md" | "md-copy" | "json") => void;
   canExport: boolean;
+  onAsk: () => void;
+  canAsk: boolean;
 };
 
 /** Slim sticky bar: brand, the title once you scroll, and labeled actions. */
-export function SessionHeader({ meta, events, hiddenAfter, showTitle, toolsOpen, onToggleTools, onExport, canExport }: Props) {
+export function SessionHeader({ meta, events, hiddenAfter, showTitle, toolsOpen, onToggleTools, onExport, canExport, onAsk, canAsk }: Props) {
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -52,6 +54,7 @@ export function SessionHeader({ meta, events, hiddenAfter, showTitle, toolsOpen,
             <TooltipTrigger asChild><Button variant="ghost" size="icon-sm" aria-label="Toggle tool details" aria-pressed={toolsOpen === true} onClick={onToggleTools}><PanelsTopLeft /></Button></TooltipTrigger>
             <TooltipContent>{toolsOpen ? "Collapse all tool calls" : "Expand all tool calls"}</TooltipContent>
           </Tooltip>
+          <Button variant="ghost" size="sm" onClick={onAsk} disabled={!canAsk} className="gap-1.5"><MessageCircleQuestion /><span className="hidden sm:inline">Ask</span></Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" disabled={!canExport} className="gap-1.5"><Download /><span className="hidden sm:inline">Export</span><ChevronDown className="size-3 opacity-60" /></Button></DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">

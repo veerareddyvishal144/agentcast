@@ -13,6 +13,7 @@ export const DocHeader = forwardRef<HTMLDivElement, Props>(function DocHeader({ 
   if (meta?.model) parts.push(meta.model);
   if (meta) parts.push(meta.endedAt ? `ran ${duration(meta.createdAt, meta.endedAt)}` : `started ${ago(meta.createdAt)}`);
   if (viewers > 0) parts.push(viewers === 1 ? "1 watching" : `${viewers} watching`);
+  if (meta?.kept) parts.push("kept");
   return (
     <div ref={ref} className="border-b pb-6">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">

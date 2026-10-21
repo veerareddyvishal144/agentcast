@@ -12,6 +12,7 @@
 //   passphrase                AGENTCAST_PASSPHRASE    viewers must enter this passphrase
 //   ai_summary (true/false)   AGENTCAST_NO_AI=1       AI-generated title and summary at session end
 //   enabled (true/false)      AGENTCAST_DISABLE=1     turn streaming off entirely
+//   retention                 AGENTCAST_RETENTION     how long links live: 24h (default), 7d, 30d, or forever
 // Plugin settings arrive as CLAUDE_PLUGIN_OPTION_<NAME> environment variables.
 
 import fs from "node:fs";
@@ -38,7 +39,20 @@ export function resolveConfig(env = process.env) {
     passphrase: opt("PASSPHRASE") || env.AGENTCAST_PASSPHRASE || undefined,
     aiSummary: bool(opt("AI_SUMMARY"), env.AGENTCAST_NO_AI !== "1"),
     enabled: bool(opt("ENABLED"), env.AGENTCAST_DISABLE !== "1"),
+    retention: parseRetention(opt("RETENTION") || env.AGENTCAST_RETENTION),
   };
+}
+
+/** "24h" | "7d" | "30d" | "forever" | "36" (hours) -> { keep } or { ttlHours } */
+export function parseRetention(v) {
+  if (!v) return {};
+  const s = String(v).trim().toLowerCase();
+  if (s === "forever" || s === "keep" || s === "permanent") return { keep: true };
+  const m = /^(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|d|day|days)?$/.exec(s);
+  if (!m) return {};
+  const n = Number(m[1]);
+  const unit = m[2] || "h";
+  return { ttlHours: unit.startsWith("d") ? n * 24 : n };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath_(import.meta.url);
@@ -76,6 +90,7 @@ async function main() {
       title: `${project || "Claude Code"} session${resumedFrom ? " (continued)" : ""}`,
       passphrase: cfg.passphrase,
       ai: cfg.aiSummary,
+      ...cfg.retention,
     });
     if (created.status !== 201 || !created.body?.id) {
       if (created.status === 0 || created.status >= 500) setBackoff();
@@ -91,9 +106,10 @@ async function main() {
     const startData = { agent: "claude-code", project, source: payload.source || hook_event_name };
     if (resumedFrom) { startData.continues = resumedFrom.id; startData.continuesUrl = resumedFrom.url; }
     await postEvents(cfg, state, [{ ts: new Date().toISOString(), kind: "session_start", data: startData }], null);
+    const flags = [cfg.passphrase ? "passphrase protected" : "", created.body.kept ? "kept permanently" : ""].filter(Boolean);
     emit(resumedFrom
       ? `agentcast continues in a new link: ${state.url}  (earlier part: ${resumedFrom.url})`
-      : `agentcast is live: ${state.url}${cfg.passphrase ? "  (passphrase protected)" : ""}`);
+      : `agentcast is live: ${state.url}${flags.length ? `  (${flags.join(", ")})` : ""}`);
   }
 
   // Paused: keep the offset moving so paused content is never uploaded later.

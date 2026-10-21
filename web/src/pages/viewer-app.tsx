@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, Ghost } from "lucide-react";
 import { toast } from "sonner";
+import { AskPanel } from "@/components/ask-panel";
 import { ClipBanner } from "@/components/clip-banner";
 import { DocHeader } from "@/components/doc-header";
 import { GateDialog } from "@/components/gate-dialog";
@@ -17,7 +18,7 @@ import { clipUrl, useClip } from "@/hooks/use-clip";
 import { useReplay } from "@/hooks/use-replay";
 import { useSession } from "@/hooks/use-session";
 import { downloadText, exportFilename, sessionJson, sessionMarkdown } from "@/lib/export";
-import type { StoredEvent } from "@/lib/types";
+import type { Answer, StoredEvent } from "@/lib/types";
 
 export function ViewerApp() {
   const id = useMemo(() => location.pathname.split("/")[2] ?? "", []);
@@ -26,6 +27,17 @@ export function ViewerApp() {
   const { clip, setClip } = useClip();
   const [toolsOpen, setToolsOpen] = useState<boolean | null>(location.hash === "#tools" ? true : null);
   const [preview, setPreview] = useState<Range | null>(null);
+  const [askOpen, setAskOpen] = useState(() => new URLSearchParams(location.search).has("ask"));
+  const [askInitial, setAskInitial] = useState<string | null>(() => new URLSearchParams(location.search).get("ask"));
+  const canAsk = !!s.meta && s.meta.ai !== false && s.events.length > 0 && s.status !== "gone" && s.status !== "expired";
+  const openAsk = useCallback((q?: string) => { if (q) setAskInitial(q); setAskOpen(true); }, []);
+  const ask = useCallback(async (q: string): Promise<Answer> => {
+    const key = sessionStorage.getItem(`agentcast:key:${id}`);
+    const res = await fetch(`/api/sessions/${id}/ask`, { method: "POST", headers: { "content-type": "application/json", ...(key ? { "x-agentcast-key": key } : {}) }, body: JSON.stringify({ question: q }) });
+    const j = (await res.json().catch(() => null)) as (Answer & { error?: string }) | null;
+    if (!res.ok || !j) throw new Error(j?.error ?? (res.status === 429 ? "Too many questions, try again in a minute." : "Could not get an answer."));
+    return j;
+  }, [id]);
 
   // Events in the current view: the whole session, or the clipped range.
   const baseEvents = useMemo(
@@ -113,6 +125,7 @@ export function ViewerApp() {
           meta={s.meta} events={baseEvents} hiddenAfter={hiddenAfter} showTitle={showTitle}
           toolsOpen={toolsOpen} onToggleTools={() => setToolsOpen((v) => (v === true ? false : true))}
           onExport={onExport} canExport={!!s.meta && baseEvents.length > 0}
+          onAsk={() => openAsk()} canAsk={canAsk}
         />
 
         <div className="mx-auto flex max-w-[1120px] gap-12 px-5 pt-10 pb-32">
@@ -120,8 +133,8 @@ export function ViewerApp() {
             <DocHeader ref={docRef} meta={s.meta} status={s.status} viewers={s.viewers} clipLabel={clip ? `Clip · ${countOf(baseEvents)} of ${countOf(s.events)} events` : null} />
             <div className="pt-2">
               {clip && <div className="pt-4"><ClipBanner count={countOf(baseEvents)} total={countOf(s.events)} onClear={() => setClip(null)} /></div>}
-              {s.status === "gone" ? (
-                <EmptyState />
+              {s.status === "gone" || s.status === "expired" ? (
+                <EmptyState reason={s.goneReason ?? "missing"} />
               ) : s.events.length === 0 ? (
                 <LoadingState locked={s.needsKey} />
               ) : baseEvents.length === 0 ? (
@@ -132,7 +145,7 @@ export function ViewerApp() {
             </div>
           </main>
           <aside className="hidden w-[220px] shrink-0 lg:block">
-            <div className="sticky top-20"><Outline events={baseEvents} hiddenAfter={hiddenAfter} meta={s.meta} /></div>
+            <div className="sticky top-20"><Outline events={baseEvents} hiddenAfter={hiddenAfter} meta={s.meta} onAsk={(q) => openAsk(q)} canAsk={canAsk} /></div>
           </aside>
         </div>
 
@@ -140,6 +153,7 @@ export function ViewerApp() {
           <Button onClick={jump} size="sm" className="fixed bottom-6 left-1/2 z-30 -translate-x-1/2 rounded-full shadow-lg"><ArrowDown /> New events</Button>
         )}
         {ended && baseEvents.length > 0 && <ReplayDock replay={replay} events={baseEvents} ended={ended} onPreviewRange={setPreview} onCreateClip={onCreateClip} />}
+        <AskPanel open={askOpen} onOpenChange={setAskOpen} initialQuestion={askInitial} ask={ask} enabled={canAsk} />
         <GateDialog open={s.needsKey} error={s.gateError} onSubmit={s.submitKey} />
         <Toaster position="bottom-right" />
       </div>
@@ -159,12 +173,17 @@ function LoadingState({ locked }: { locked: boolean }) {
   );
 }
 
-function EmptyState() {
+function EmptyState({ reason }: { reason: "expired" | "deleted" | "missing" }) {
+  const text = reason === "deleted"
+    ? "The owner deleted this session. Its events were removed from the server."
+    : reason === "expired"
+      ? "This session reached its expiry and deleted itself."
+      : "The link has expired, was deleted, or never existed.";
   return (
     <div className="mt-10 max-w-md">
       <div className="mb-4 grid size-10 place-items-center rounded-lg border bg-card text-muted-foreground"><Ghost className="size-5" /></div>
-      <h2 className="text-lg font-semibold">This session is gone</h2>
-      <p className="mt-2 text-sm text-muted-foreground">The link has expired or never existed. agentcast sessions delete themselves 24 hours after they start.</p>
+      <h2 className="text-lg font-semibold">{reason === "deleted" ? "This session was deleted" : "This session is gone"}</h2>
+      <p className="mt-2 text-sm text-muted-foreground">{text}</p>
       <Button asChild variant="outline" size="sm" className="mt-5"><a href="/">About agentcast</a></Button>
     </div>
   );

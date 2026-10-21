@@ -5,6 +5,8 @@
 //   node agentcast.mjs title <new title>   rename the session (locks the title against AI renaming)
 //   node agentcast.mjs pause | resume      stop/start uploading events for this session
 //   node agentcast.mjs end                 end the stream now (triggers the AI summary)
+//   node agentcast.mjs keep | unkeep       keep this link forever, or restore its expiry
+//   node agentcast.mjs delete --yes        delete the session from the server immediately
 //   node agentcast.mjs setup               check Node, server reachability and configuration
 // Options: --session <claude-session-id>  (default: the most recent session the hook saw)
 
@@ -29,8 +31,11 @@ async function main() {
     case "pause": return setPaused(true);
     case "resume": return setPaused(false);
     case "end": return end();
+    case "keep": return keep(true);
+    case "unkeep": return keep(false);
+    case "delete": return del();
     case "setup": return setup();
-    default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end or setup.`);
+    default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end, keep, unkeep, delete or setup.`);
   }
 }
 
@@ -60,7 +65,7 @@ async function status() {
   const meta = await http("GET", `${cfg.serverUrl}/api/sessions/${state.id}/meta`, null, null);
   if (meta.status === 200 && meta.body?.meta?.title) {
     console.log(`title:    ${meta.body.meta.title}`);
-    console.log(`events:   ${meta.body.meta.eventCount ?? "?"}   expires: ${meta.body.meta.expiresAt ?? "?"}`);
+    console.log(`events:   ${meta.body.meta.eventCount ?? "?"}   expires: ${meta.body.meta.kept ? "never (kept)" : meta.body.meta.expiresAt ?? "?"}`);
   }
 }
 
@@ -91,6 +96,27 @@ async function end() {
   console.log(`Ended. The replay stays at ${state.url} until it expires.`);
 }
 
+async function keep(kept) {
+  const { state } = current();
+  if (!state) return console.log("No agentcast session yet.");
+  const res = await http("POST", `${cfg.serverUrl}/api/sessions/${state.id}/keep`, { kept }, state.token);
+  if (res.status !== 200) return console.log(`Could not update (${res.status}): ${res.body?.error ?? res.error ?? "unknown error"}`);
+  if (kept) console.log(`Kept. ${state.url} will not expire. Use \`agentcast unkeep\` to restore an expiry, or \`agentcast delete --yes\` to remove it.`);
+  else console.log(`Expiry restored. ${state.url} now expires ${res.body?.expiresAt ?? "later"}.`);
+}
+
+async function del() {
+  const { state, file } = current();
+  if (!state) return console.log("No agentcast session yet.");
+  if (!rest.includes("--yes")) return console.log(`This permanently deletes ${state.url} and everything in it for every viewer. Re-run with --yes to confirm.`);
+  const res = await http("DELETE", `${cfg.serverUrl}/api/sessions/${state.id}`, null, state.token);
+  if (res.status === 200 || res.status === 404) {
+    state.disabled = true; state.endReason = "manual"; state.deleted = true;
+    writeJson(file, state);
+    console.log(`Deleted. ${state.url} is gone. Streaming for this Claude session is off; a new session will get a new link.`);
+  } else console.log(`Delete failed (${res.status}): ${res.body?.error ?? res.error ?? "unknown error"}`);
+}
+
 async function setup() {
   const [major] = process.versions.node.split(".").map(Number);
   console.log(`node:       v${process.versions.node} ${major >= 18 ? "ok" : "too old, need 18+"}`);
@@ -100,6 +126,7 @@ async function setup() {
   console.log(`enabled:    ${cfg.enabled}`);
   console.log(`passphrase: ${cfg.passphrase ? "set (viewers must enter it)" : "none (anyone with the link can view)"}`);
   console.log(`ai summary: ${cfg.aiSummary ? "on" : "off"}`);
+  console.log(`retention:  ${cfg.retention.keep ? "forever" : cfg.retention.ttlHours ? `${cfg.retention.ttlHours} hours` : "server default (24 hours)"}`);
   console.log(`state dir:  ${HOME_DIR}`);
   console.log("shared:     prompts, replies, tool calls and results. Never shared: thinking, subagent chatter, full paths. Secrets are redacted before upload.");
   const { state } = current();

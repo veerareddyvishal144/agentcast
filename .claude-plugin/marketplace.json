@@ -1,13 +1,16 @@
 {
   "name": "agentcast",
-  "owner": { "name": "agentcast", "url": "https://agentcast.agentcast.workers.dev" },
+  "owner": {
+    "name": "agentcast",
+    "url": "https://agentcast.agentcast.workers.dev"
+  },
   "description": "Live, shareable Claude Code sessions.",
   "plugins": [
     {
       "name": "agentcast",
       "source": "./plugin",
       "description": "Stream your Claude Code session to a shareable live link, with replay when it ends.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "productivity"
     }
   ]

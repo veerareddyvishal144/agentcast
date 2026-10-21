@@ -17,16 +17,19 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" status               # server, st
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" title <new title>    # rename the shared session
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" pause | resume       # stop or restart uploading
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" end                  # end the stream, trigger summary
+node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" keep | unkeep        # keep the link forever, or restore expiry
+node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" delete --yes         # delete the session now (confirm with the user first)
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" setup                # check config and connectivity
 ```
 
-The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:setup.
+The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:keep, /agentcast:unkeep, /agentcast:delete, /agentcast:setup.
 
 ## What to tell users
 
 - Shared: user prompts, your replies, tool calls with inputs, and tool results. Not shared: your thinking, subagent transcripts, injected system reminders, full filesystem paths (only the project folder name).
 - Common secret formats are redacted on their machine before upload and again on the server, but they should still avoid pasting secrets into a streamed session.
-- Links expire 24 hours after the session starts. The page becomes a replay once the session ends.
+- Links expire 24 hours after the session starts unless the retention setting says otherwise or the user keeps the session. The page becomes a replay once the session ends. Viewers can ask questions about the session on the page; answers cite events.
+- Kept sessions live until the owner deletes them with /agentcast:delete. Always confirm before deleting.
 - A viewer passphrase can be set in the plugin settings (passphrase) or with AGENTCAST_PASSPHRASE. Never print the passphrase value.
 - To stop sharing for good: /agentcast:end ends this session; the plugin setting "enabled" or AGENTCAST_DISABLE=1 turns streaming off.
 

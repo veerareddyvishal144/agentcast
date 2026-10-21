@@ -1,11 +1,20 @@
 {
   "name": "agentcast",
   "displayName": "agentcast",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Stream your Claude Code session to a shareable live link. Viewers watch prompts, replies, tool calls and diffs as they happen, then replay when it ends.",
-  "author": { "name": "Vishal Veera Reddy" },
+  "author": {
+    "name": "Vishal Veera Reddy"
+  },
   "homepage": "https://agentcast.agentcast.workers.dev",
-  "keywords": ["share", "stream", "live", "replay", "session", "pair-programming"],
+  "keywords": [
+    "share",
+    "stream",
+    "live",
+    "replay",
+    "session",
+    "pair-programming"
+  ],
   "userConfig": {
     "server_url": {
       "type": "string",
@@ -27,6 +36,11 @@
       "type": "boolean",
       "title": "Streaming enabled",
       "description": "Turn off to stop streaming without uninstalling (on by default)."
+    },
+    "retention": {
+      "type": "string",
+      "title": "Link retention",
+      "description": "How long share links live: 24h (default), 7d, 30d, or forever. You can also keep or delete individual sessions with /agentcast:keep and /agentcast:delete."
     }
   }
 }

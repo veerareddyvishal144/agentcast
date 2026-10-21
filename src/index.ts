@@ -4,7 +4,7 @@ export { SessionDO };
 
 const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET,POST,PATCH,OPTIONS",
+  "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
   "access-control-allow-headers": "authorization,content-type,x-agentcast-key",
 };
 const ID_RE = /^[a-z0-9]{6,32}$/;
@@ -62,8 +62,8 @@ async function viewerPage(env: Env, url: URL, id: string): Promise<Response> {
       desc = "This session needs a passphrase to view.";
     }
   } else if (metaRes && !metaRes.ok && metaRes.status === 404) {
-    title = "Session not found or expired";
-    desc = "agentcast links expire 24 hours after the session starts.";
+    title = "Session not found";
+    desc = "This agentcast link has expired or was deleted by its owner.";
   }
 
   const tags = [
@@ -111,6 +111,26 @@ async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
     return fromResult(await stub.getState(after, limit, key));
   }
 
+  if (!sub && req.method === "DELETE") {
+    return fromResult(await stub.destroy(bearer(req)));
+  }
+
+  if (sub === "keep" && req.method === "POST") {
+    const body = (await readJson(req)) as { kept?: unknown } | null;
+    return fromResult(await stub.keep(bearer(req), body?.kept !== false));
+  }
+
+  if (sub === "ask" && req.method === "POST") {
+    if (env.ASK_LIMITER) {
+      const ip = req.headers.get("cf-connecting-ip") || "unknown";
+      const { success } = await env.ASK_LIMITER.limit({ key: ip });
+      if (!success) return json({ error: "too many questions from this address; try again in a minute" }, 429);
+    }
+    if (tooLarge(req)) return json({ error: "body too large" }, 413);
+    const body = (await readJson(req)) as { question?: unknown } | null;
+    return fromResult(await stub.ask(key, body?.question));
+  }
+
   if (!sub && req.method === "PATCH") {
     if (tooLarge(req)) return json({ error: "body too large" }, 413);
     const body = (await readJson(req)) as { title?: unknown } | null;
@@ -149,7 +169,7 @@ async function createSession(req: Request, env: Env, url: URL): Promise<Response
     if (!success) return json({ error: "too many sessions created from this address; try again in a minute" }, 429);
   }
 
-  const body = ((await readJson(req)) ?? {}) as { title?: string; agent?: string; project?: string; model?: string; passphrase?: string; ai?: boolean };
+  const body = ((await readJson(req)) ?? {}) as { title?: string; agent?: string; project?: string; model?: string; passphrase?: string; ai?: boolean; keep?: boolean; ttlHours?: number };
   if (body.passphrase !== undefined && (typeof body.passphrase !== "string" || body.passphrase.length < 4 || body.passphrase.length > 200)) {
     return json({ error: "passphrase must be 4 to 200 characters" }, 400);
   }
@@ -159,11 +179,11 @@ async function createSession(req: Request, env: Env, url: URL): Promise<Response
     const token = randomHex(32);
     const stub = env.SESSIONS.get(env.SESSIONS.idFromName(id));
     const res = await stub.create(
-      { id, title: str(body.title), agent: str(body.agent), project: str(body.project), model: str(body.model), passphrase: str(body.passphrase), ai: body.ai !== false },
+      { id, title: str(body.title), agent: str(body.agent), project: str(body.project), model: str(body.model), passphrase: str(body.passphrase), ai: body.ai !== false, keep: body.keep === true, ttlHours: typeof body.ttlHours === "number" ? body.ttlHours : undefined },
       token,
     );
     if (res.ok) {
-      return json({ id, token, url: `${url.origin}/s/${id}`, expiresAt: res.value.expiresAt, protected: res.value.protected }, 201);
+      return json({ id, token, url: `${url.origin}/s/${id}`, expiresAt: res.value.expiresAt, kept: res.value.kept, protected: res.value.protected }, 201);
     }
     if (res.status !== 409) return fromResult(res);
   }

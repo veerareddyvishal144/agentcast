@@ -19,6 +19,7 @@ export function sessionMarkdown(meta: Meta, events: StoredEvent[], results: Map<
   if (meta.model) out.push(`| Model | ${meta.model} |`);
   out.push(`| Started | ${dateTime(meta.createdAt)} |`);
   if (meta.endedAt) out.push(`| Duration | ${duration(meta.createdAt, meta.endedAt)} |`);
+  if (meta.kept) out.push(`| Retention | kept permanently |`);
   out.push(`| Events | ${events.filter((e) => e.kind !== "tool_result").length} |`);
   out.push(`| Link | ${url} |`, "", "---", "");
 

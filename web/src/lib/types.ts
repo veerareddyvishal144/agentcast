@@ -8,10 +8,11 @@ export type Meta = {
   protected: boolean;
   ai: boolean;
   titleLocked?: boolean;
+  kept?: boolean;
   createdAt: string;
   updatedAt: string;
   endedAt: string | null;
-  expiresAt: string;
+  expiresAt: string | null;
   eventCount: number;
 };
 
@@ -37,4 +38,8 @@ export type ServerMessage =
   | { type: "event"; event: StoredEvent }
   | { type: "viewers"; n: number }
   | { type: "ready" }
-  | { type: "expired" };
+  | { type: "expired" }
+  | { type: "deleted" };
+
+export type Citation = { seq: number; kind: string; label: string; ts: string };
+export type Answer = { answer: string; citations: Citation[]; indexed: boolean };

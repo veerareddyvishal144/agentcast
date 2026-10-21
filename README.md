@@ -8,7 +8,7 @@ Runs on Cloudflare Workers: one Worker, one Durable Object per session, Workers 
 
 ```
 src/index.ts              Worker: HTTP API, viewer route with link-preview tags, rate limiting, static assets
-src/session.ts            SessionDO: per-session event log (SQLite), WebSocket fan-out, passphrase auth, rename, AI summary, 24h expiry alarm
+src/session.ts            SessionDO: per-session event log (SQLite), WebSocket fan-out, passphrase auth, rename, keep/delete, incremental Vectorize indexing, ask, AI summary, expiry alarm
 plugin/                   Claude Code plugin (also the canonical home of the hook)
   .claude-plugin/plugin.json  Manifest with userConfig (server_url, passphrase, ai_summary, enabled)
   hooks/hooks.json            SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd
@@ -51,9 +51,9 @@ Dark theme by default with a light toggle, Geist font self-hosted, no runtime CS
 /plugin install agentcast@agentcast
 ```
 
-Then start a new session. The share link appears as a system message. Configure in the plugin settings: `server_url`, `passphrase`, `ai_summary`, `enabled`.
+Then start a new session. The share link appears as a system message. Configure in the plugin settings: `server_url`, `passphrase`, `ai_summary`, `enabled`, `retention` (`24h`, `7d`, `30d`, or `forever`).
 
-Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:setup`. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
+Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:setup`. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
 
 To try the plugin from a checkout without installing: `claude --plugin-dir ./plugin`.
 
@@ -73,6 +73,7 @@ Environment variables read by the hook (plugin settings take precedence):
 | `AGENTCAST_NO_AI=1` | Skip the AI-generated title and summary at session end |
 | `AGENTCAST_DISABLE=1` | Do nothing |
 | `AGENTCAST_URL` | Point at a different server (set by the installer) |
+| `AGENTCAST_RETENTION` | `24h` (default), `7d`, `30d`, `forever`, or a number of hours; capped by the server's `MAX_TTL_HOURS` |
 
 ## Viewer features
 
@@ -81,6 +82,8 @@ Environment variables read by the hook (plugin settings take precedence):
 - **Clips**: press the scissors (or `C`) in the dock, pick a range, copy the link. Clip links look like `/s/<id>?from=<seq>&to=<seq>` and get their own link preview.
 - **Export**: download the current view (full session or clip) as Markdown or JSON, or copy Markdown to the clipboard.
 - **Rename**: `/agentcast:title <name>` or `PATCH /api/sessions/:id` with the writer token. A manual title is locked so the AI summary does not replace it.
+- **Ask the session**: a question box (header button, sidebar input, or `?ask=<question>` in the URL). Answers come only from this session's events and cite them; clicking a citation jumps to the event. Retrieval is hybrid: Vectorize semantic search over events indexed incrementally during the session, plus keyword and recency matches, so it works on live sessions too. Protected sessions require the passphrase; sessions with AI off have no question box.
+- **Keep and delete**: `/agentcast:keep` makes a link permanent, `/agentcast:unkeep` restores the expiry, `/agentcast:delete` removes the session for everyone immediately (asks for confirmation).
 - Passphrase gate, light and dark themes, `#tools` to open every tool call.
 
 ## Develop
@@ -98,7 +101,7 @@ npx wrangler login
 npm run deploy
 ```
 
-Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a rate limiter (20 session creations per IP per minute), and vars for TTL, event cap, AI model, and public URL.
+Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a Vectorize index (`agentcast-sessions`, 384 dimensions, cosine; create it once with `npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine`), two rate limiters (20 session creations and 30 questions per IP per minute), and vars for TTL, max TTL, event cap, and the answer and embedding models.
 
 ## Session lifecycle
 
@@ -113,6 +116,8 @@ What the hook does at each point in a Claude Code session:
 | Quit Claude Code | The link ends (replay mode, AI summary runs) |
 | `claude --resume` or `--continue` after a quit | A **continuation link** is created, holding only what happens from the resume onward. Its first line links back to the earlier part, and the hook names both links in the system message |
 | `/agentcast:end` or `agentcast end` | The link ends and the hook stays silent for the rest of that Claude session, even across resumes |
+| `/agentcast:keep` | The link never expires until you delete it. `/agentcast:unkeep` puts the expiry back |
+| `/agentcast:delete` | The session is removed from the server immediately, viewers see "deleted", and the hook stays silent for the rest of that Claude session |
 | Terminal closed or crash (no session-end signal) | The link stays "live" until it expires. There is no inactivity timeout yet |
 | Two Claude Code windows at once | Two independent links. The CLI acts on whichever session's hook ran most recently |
 
@@ -147,16 +152,21 @@ Fractional hours work (`"0.5"` is 30 minutes). Values set in the Cloudflare dash
 
 **Storage implications.** Longer lifetimes keep more sessions on disk at once. A typical session is 50 KB to 2 MB of SQLite storage. The Workers free plan allows 5 GB in total across all Durable Objects, so a 7-day lifetime is comfortable for personal use; a 30-day lifetime at team scale calls for the paid plan or the R2 archival item on the roadmap.
 
-**Not available yet.** Per-session or per-user lifetimes, and deleting a session before it expires. Both are straightforward additions: a `ttl_hours` field on session creation, capped by the server setting, and a token-protected `DELETE /api/sessions/:id`.
+**Per-session lifetime.** The plugin setting `retention` (or `AGENTCAST_RETENTION`) sends a `ttlHours` or `keep` flag when the session is created. Hours are capped by `MAX_TTL_HOURS` (default 8760, one year); `forever` creates a kept session with no expiry.
+
+**Keeping and deleting.** `/agentcast:keep` (`POST /api/sessions/:id/keep` with the writer token) removes the expiry from an existing session; `/agentcast:unkeep` restores it, with at least an hour of grace. `/agentcast:delete` (`DELETE /api/sessions/:id`) removes the session, its events, and its search index immediately. Kept sessions count toward Durable Object storage: a typical session is 50 KB to 2 MB, against 5 GB on the free plan.
 
 ## API
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/sessions` | none, rate limited | Create session. Body `{ title?, agent?, project?, model?, passphrase?, ai? }`. Returns `{ id, token, url, expiresAt, protected }` |
+| POST | `/api/sessions` | none, rate limited | Create session. Body `{ title?, agent?, project?, model?, passphrase?, ai?, keep?, ttlHours? }`. Returns `{ id, token, url, expiresAt, kept, protected }` |
 | POST | `/api/sessions/:id/events` | `Authorization: Bearer <token>` | Append `{ events: [...], meta?: { title?, model? } }` |
 | POST | `/api/sessions/:id/end` | Bearer token | Mark ended; triggers the AI summary |
 | PATCH | `/api/sessions/:id` | Bearer token | Rename: `{ title }`. Locks the title against AI renaming |
+| POST | `/api/sessions/:id/keep` | Bearer token | `{ kept: true|false }`. Keep forever or restore the expiry |
+| DELETE | `/api/sessions/:id` | Bearer token | Delete the session, its events and its vectors now |
+| POST | `/api/sessions/:id/ask` | viewer key if protected, rate limited | `{ question }` → `{ answer, citations: [{ seq, kind, label, ts }], indexed }` |
 | GET | `/api/sessions/:id/meta` | viewer key if protected | `{ meta, authorized }`. Unauthorized viewers get a stripped meta |
 | GET | `/api/sessions/:id?after=N` | viewer key if protected | Metadata plus events after sequence N |
 | GET | `/api/sessions/:id/ws?after=N` | see below | WebSocket stream |
@@ -174,7 +184,7 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 - Only the project directory name is sent, not the full path.
 - Viewer pages carry `noindex`. Links expire after `SESSION_TTL_HOURS` (default 24) and the Durable Object deletes its storage. See [Link expiration](#link-expiration).
 - Passphrases are stored as PBKDF2-SHA256 hashes with a per-session salt.
-- The AI summary runs on Workers AI inside Cloudflare, over already-redacted text, and can be disabled per session.
+- The AI summary, the search index and question answering run on Workers AI and Vectorize inside Cloudflare, over already-redacted text, and are all disabled together when AI is off for a session. Vectors are deleted when the session expires or is deleted.
 - If the server is unreachable the hook backs off for 10 minutes so it never slows Claude Code.
 
 ## Limits
@@ -185,4 +195,4 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 
 ## Not yet built
 
-Accounts (needs an identity provider decision), R2 archival past 24 hours, comments, approval mode, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace.
+Accounts (needs an identity provider decision), R2 archival as a cheaper tier for kept sessions, standalone HTML export, comments, approval mode, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace.

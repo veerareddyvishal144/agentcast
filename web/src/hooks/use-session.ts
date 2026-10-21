@@ -9,6 +9,7 @@ type State = {
   needsKey: boolean;
   gateError: string | null;
   ready: boolean;
+  goneReason: "expired" | "deleted" | "missing" | null;
 };
 
 type Action =
@@ -17,9 +18,10 @@ type Action =
   | { type: "viewers"; n: number }
   | { type: "status"; status: Status }
   | { type: "gate"; needsKey: boolean; error?: string | null }
+  | { type: "gone"; reason: "expired" | "deleted" | "missing" }
   | { type: "ready" };
 
-const initial: State = { meta: null, events: [], status: "connecting", viewers: 0, needsKey: false, gateError: null, ready: false };
+const initial: State = { meta: null, events: [], status: "connecting", viewers: 0, needsKey: false, gateError: null, ready: false, goneReason: null };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -35,6 +37,7 @@ function reducer(s: State, a: Action): State {
     case "viewers": return { ...s, viewers: a.n };
     case "status": return { ...s, status: a.status };
     case "gate": return { ...s, needsKey: a.needsKey, gateError: a.error ?? null, status: a.needsKey ? "locked" : s.status };
+    case "gone": return { ...s, goneReason: a.reason, status: a.reason === "expired" ? "expired" : "gone", needsKey: false };
     case "ready": return { ...s, ready: true, status: s.meta?.endedAt ? "ended" : "live" };
   }
 }
@@ -78,7 +81,8 @@ export function useSession(id: string) {
           case "event": lastSeq = Math.max(lastSeq, msg.event.seq); dispatch({ type: "events", events: [msg.event] }); break;
           case "viewers": dispatch({ type: "viewers", n: msg.n }); break;
           case "ready": dispatch({ type: "ready" }); break;
-          case "expired": stopped = true; dispatch({ type: "status", status: "expired" }); break;
+          case "expired": stopped = true; dispatch({ type: "gone", reason: "expired" }); break;
+          case "deleted": stopped = true; dispatch({ type: "gone", reason: "deleted" }); break;
         }
       };
       ws.onclose = (e) => {
@@ -105,7 +109,7 @@ export function useSession(id: string) {
         return;
       }
       if (!alive) return;
-      if (res.status === 404) { stopped = true; dispatch({ type: "status", status: "gone" }); return; }
+      if (res.status === 404) { stopped = true; dispatch({ type: "gone", reason: "missing" }); return; }
       if (!res.ok) { setTimeout(boot, 3000); return; }
       const j = (await res.json()) as { meta: Meta; authorized: boolean };
       if (!j.authorized) { dispatch({ type: "gate", needsKey: true }); return; }

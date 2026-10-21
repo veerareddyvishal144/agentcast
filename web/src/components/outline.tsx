@@ -1,16 +1,30 @@
+import { useState } from "react";
+import { ArrowUp, MessageCircleQuestion } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { clock, dateTime, duration } from "@/lib/format";
 import { sessionStats } from "@/lib/turns";
 import { cn } from "@/lib/utils";
 import type { Meta, StoredEvent } from "@/lib/types";
 
-type Props = { events: StoredEvent[]; hiddenAfter: number; meta: Meta | null; onJump?: () => void; className?: string };
+type Props = { events: StoredEvent[]; hiddenAfter: number; meta: Meta | null; onJump?: () => void; className?: string; onAsk?: (q: string) => void; canAsk?: boolean };
 
 /** Sidebar: turn outline, a few numbers, and the fine print. */
-export function Outline({ events, hiddenAfter, meta, onJump, className }: Props) {
+export function Outline({ events, hiddenAfter, meta, onJump, className, onAsk, canAsk }: Props) {
   const turns = events.filter((e) => e.kind === "user");
   const stats = sessionStats(events);
+  const [q, setQ] = useState("");
   return (
     <div className={cn("space-y-7 text-sm", className)}>
+      {onAsk && (
+        <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); if (q.trim() && canAsk) { onAsk(q.trim()); setQ(""); } }}>
+          <div className="relative flex-1">
+            <MessageCircleQuestion className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={canAsk ? "Ask this session…" : "AI is off for this session"} disabled={!canAsk} className="h-8 pl-8 text-[13px]" maxLength={500} />
+          </div>
+          <Button type="submit" size="icon-sm" variant="outline" disabled={!canAsk || !q.trim()} aria-label="Ask"><ArrowUp /></Button>
+        </form>
+      )}
       <section>
         <h2 className="mb-2 text-[11px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">Outline</h2>
         {turns.length === 0 ? (
@@ -41,7 +55,7 @@ export function Outline({ events, hiddenAfter, meta, onJump, className }: Props)
             <dt className="text-muted-foreground">Turns</dt><dd className="tabular-nums">{stats.turns}</dd>
             <dt className="text-muted-foreground">Tool calls</dt><dd className="tabular-nums">{stats.tools}{stats.errors ? <span className="text-bad"> · {stats.errors} failed</span> : null}</dd>
             {meta.endedAt && <><dt className="text-muted-foreground">Duration</dt><dd className="tabular-nums">{duration(meta.createdAt, meta.endedAt)}</dd></>}
-            <dt className="text-muted-foreground">Expires</dt><dd className="tabular-nums">{dateTime(meta.expiresAt)}</dd>
+            <dt className="text-muted-foreground">Expires</dt><dd className="tabular-nums">{meta.kept || !meta.expiresAt ? "Never (kept)" : dateTime(meta.expiresAt)}</dd>
           </dl>
         </section>
       )}

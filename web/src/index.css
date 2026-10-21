@@ -237,3 +237,7 @@
 .md table { border-collapse: collapse; margin: 0.6rem 0; font-size: 0.9em; }
 .md th, .md td { border: 1px solid var(--border); padding: 0.3rem 0.6rem; text-align: left; }
 .md hr { border: 0; border-top: 1px solid var(--border); margin: 0.8rem 0; }
+
+/* citation jump highlight */
+@keyframes flash { 0% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--brand) 55%, transparent); background: color-mix(in oklch, var(--brand) 14%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; background: transparent; } }
+.flash { animation: flash 1.6s ease-out 1; border-radius: 8px; }
