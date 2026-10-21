@@ -46,9 +46,10 @@ export function AskPanel({ open, onOpenChange, initialQuestion, ask, enabled }: 
     }
   };
 
+  // Fire a deep-linked question once the session has loaded enough to be asked.
   useEffect(() => {
-    if (open && initialQuestion && asked.current !== initialQuestion) { asked.current = initialQuestion; void submit(initialQuestion); }
-  }, [open, initialQuestion]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (open && enabled && initialQuestion && asked.current !== initialQuestion) { asked.current = initialQuestion; void submit(initialQuestion); }
+  }, [open, enabled, initialQuestion]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items]);
 
   return (
