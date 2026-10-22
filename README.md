@@ -13,9 +13,9 @@ plugin/                   Claude Code plugin (also the canonical home of the hoo
   .claude-plugin/plugin.json  Manifest with userConfig (server_url, passphrase, ai_summary, enabled)
   hooks/hooks.json            SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd
   bin/agentcast-hook.mjs      The hook: tails the transcript, redacts, posts events
-  bin/agentcast.mjs           CLI behind the slash commands: link, status, title, pause, resume, end, setup
+  bin/agentcast.mjs           CLI behind the slash commands: link, status, title, pause, resume, end, keep, unkeep, delete, list, setup
   bin/install.mjs             Curl-install path: adds/removes the hook in Claude Code settings
-  commands/*.md               /agentcast:link, :status, :title, :pause, :resume, :end, :setup
+  commands/*.md               /agentcast:link, :status, :title, :pause, :resume, :end, :keep, :unkeep, :delete, :list, :setup
   skills/agentcast/SKILL.md   Teaches Claude when to offer the link and how to use the CLI
   shared/redact.mjs           Secret redaction, shared with the Worker
 .claude-plugin/marketplace.json   Marketplace listing so people can /plugin install agentcast@agentcast
@@ -54,7 +54,9 @@ Dark theme by default with a light toggle, Geist font self-hosted, no runtime CS
 
 Then start a new session. The share link appears as a system message. Configure in the plugin settings: `server_url`, `passphrase`, `ai_summary`, `enabled`, `retention` (`24h`, `7d`, `30d`, or `forever`).
 
-Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:setup`. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
+Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:list`, `/agentcast:setup`.
+
+To see the links this machine has created: `/agentcast:list`, or `node plugin/bin/agentcast.mjs list [--hours 24 | --all] [--titles]`. The list comes from the hook's local state in `~/.agentcast/sessions`; there is no server-side index because sessions are isolated and there are no accounts. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
 
 To try the plugin from a checkout without installing: `claude --plugin-dir ./plugin`.
 

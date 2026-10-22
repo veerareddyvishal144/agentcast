@@ -7,6 +7,8 @@
 //   node agentcast.mjs end                 end the stream now (triggers the AI summary)
 //   node agentcast.mjs keep | unkeep       keep this link forever, or restore its expiry
 //   node agentcast.mjs delete --yes        delete the session from the server immediately
+//   node agentcast.mjs list [--hours 24] [--all] [--titles]
+//                                          links this machine created recently (newest first)
 //   node agentcast.mjs setup               check Node, server reachability and configuration
 // Options: --session <claude-session-id>  (default: the most recent session the hook saw)
 
@@ -34,8 +36,9 @@ async function main() {
     case "keep": return keep(true);
     case "unkeep": return keep(false);
     case "delete": return del();
+    case "list": return list();
     case "setup": return setup();
-    default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end, keep, unkeep, delete or setup.`);
+    default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end, keep, unkeep, delete, list or setup.`);
   }
 }
 
@@ -115,6 +118,45 @@ async function del() {
     writeJson(file, state);
     console.log(`Deleted. ${state.url} is gone. Streaming for this Claude session is off; a new session will get a new link.`);
   } else console.log(`Delete failed (${res.status}): ${res.body?.error ?? res.error ?? "unknown error"}`);
+}
+
+async function list() {
+  const hoursIdx = rest.indexOf("--hours");
+  const hours = rest.includes("--all") ? Infinity : hoursIdx >= 0 ? Number(rest[hoursIdx + 1]) || 24 : 24;
+  const withTitles = rest.includes("--titles");
+  const since = Date.now() - hours * 3_600_000;
+  let files = [];
+  try { files = fs.readdirSync(STATE_DIR).filter((f) => f.endsWith(".json")); } catch { return console.log("No agentcast sessions on this machine yet."); }
+  const rows = [];
+  for (const f of files) {
+    const file = path.join(STATE_DIR, f);
+    const st = readJson(file);
+    if (!st?.id) continue;
+    const created = Date.parse(st.createdAt || "") || fs.statSync(file).mtimeMs;
+    if (created < since) continue;
+    rows.push({ st, created, session: f.replace(/\.json$/, "") });
+  }
+  rows.sort((a, b) => b.created - a.created);
+  if (rows.length === 0) return console.log(hours === Infinity ? "No agentcast sessions on this machine." : `No agentcast links created in the last ${hours} hours. Try --hours 168 or --all.`);
+  for (const r of rows) {
+    const { st } = r;
+    let state = st.deleted ? "deleted" : st.disabled ? "ended" : st.paused ? "paused" : "streaming";
+    let extra = "";
+    if (withTitles && !st.deleted) {
+      const meta = await http("GET", `${st.server || cfg.serverUrl}/api/sessions/${st.id}/meta`, null, null);
+      if (meta.status === 404) state = "gone";
+      else if (meta.body?.meta) {
+        const m = meta.body.meta;
+        extra = m.title ? `  "${m.title}"` : "";
+        if (m.kept) extra += "  [kept]";
+        else if (m.expiresAt && Date.parse(m.expiresAt) < Date.now()) state = "expiring";
+      }
+    }
+    const when = new Date(r.created).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const flags = [st.protected ? "lock" : "", st.continues ? "cont." : ""].filter(Boolean).join(",");
+    console.log(`${when}  ${state.padEnd(9)}  ${(st.project || "").padEnd(14).slice(0, 14)}  ${st.url}${flags ? `  (${flags})` : ""}${extra}`);
+  }
+  console.log(`\n${rows.length} link${rows.length === 1 ? "" : "s"}${hours === Infinity ? "" : ` in the last ${hours} hours`}. Add --titles to fetch titles and keep/expiry state from the server.`);
 }
 
 async function setup() {
