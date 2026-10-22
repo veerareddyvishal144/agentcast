@@ -20,10 +20,11 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" end                  # end the st
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" keep | unkeep        # keep the link forever, or restore expiry
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" delete --yes         # delete the session now (confirm with the user first)
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" list [--hours 24|--all] [--titles]   # links this machine created
+node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" restore --link <id> [--keep]      # re-publish an expired session from the local transcript
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" setup                # check config and connectivity
 ```
 
-The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:keep, /agentcast:unkeep, /agentcast:delete, /agentcast:list, /agentcast:setup.
+The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:keep, /agentcast:unkeep, /agentcast:delete, /agentcast:list, /agentcast:restore, /agentcast:setup.
 
 ## What to tell users
 

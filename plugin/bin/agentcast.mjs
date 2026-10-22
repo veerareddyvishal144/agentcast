@@ -9,11 +9,16 @@
 //   node agentcast.mjs delete --yes        delete the session from the server immediately
 //   node agentcast.mjs list [--hours 24] [--all] [--titles]
 //                                          links this machine created recently (newest first)
+//   node agentcast.mjs restore --session <claude-session-id> | --link <agentcast-id-or-url> [--keep]
+//                                          re-publish an expired/deleted session from the local Claude Code transcript (new link)
 //   node agentcast.mjs setup               check Node, server reachability and configuration
 // Options: --session <claude-session-id>  (default: the most recent session the hook saw)
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { HOME_DIR, STATE_DIR, endSession, http, readJson, resolveConfig, writeJson } from "./agentcast-hook.mjs";
 
 const args = process.argv.slice(2);
@@ -37,6 +42,7 @@ async function main() {
     case "unkeep": return keep(false);
     case "delete": return del();
     case "list": return list();
+    case "restore": return restore();
     case "setup": return setup();
     default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end, keep, unkeep, delete, list or setup.`);
   }
@@ -157,6 +163,53 @@ async function list() {
     console.log(`${when}  ${state.padEnd(9)}  ${(st.project || "").padEnd(14).slice(0, 14)}  ${st.url}${flags ? `  (${flags})` : ""}${extra}`);
   }
   console.log(`\n${rows.length} link${rows.length === 1 ? "" : "s"}${hours === Infinity ? "" : ` in the last ${hours} hours`}. Add --titles to fetch titles and keep/expiry state from the server.`);
+}
+
+async function restore() {
+  // Resolve which Claude session to re-publish.
+  let sid = sessionId;
+  const linkIdx = rest.indexOf("--link");
+  if (!sid && linkIdx >= 0) {
+    const ref = String(rest[linkIdx + 1] || "").split("/").pop().split("?")[0];
+    const match = fs.readdirSync(STATE_DIR).find((f) => f.endsWith(".json") && readJson(path.join(STATE_DIR, f))?.id === ref);
+    if (!match) return console.log(`No local record of an agentcast link "${ref}". Only sessions created on this machine can be restored.`);
+    sid = match.replace(/\.json$/, "");
+  }
+  if (!sid) return console.log("Usage: agentcast restore --session <claude-session-id> | --link <agentcast-id-or-url> [--keep]");
+
+  const projectsDir = path.join(os.homedir(), ".claude", "projects");
+  let transcript = null;
+  try {
+    for (const dir of fs.readdirSync(projectsDir)) {
+      const candidate = path.join(projectsDir, dir, `${sid}.jsonl`);
+      if (fs.existsSync(candidate)) { transcript = candidate; break; }
+    }
+  } catch {}
+  if (!transcript) return console.log(`No Claude Code transcript found for session ${sid} under ${projectsDir}.`);
+
+  const stateFile = path.join(STATE_DIR, `${sid}.json`);
+  const old = readJson(stateFile);
+  const project = old?.project || "restored";
+  if (old) fs.renameSync(stateFile, `${stateFile}.replaced-${Date.now()}`);
+
+  const hookPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "agentcast-hook.mjs");
+  const env = { ...process.env };
+  if (rest.includes("--keep")) env.AGENTCAST_RETENTION = "forever";
+  const run = (payload) => spawnSync(process.execPath, [hookPath], { input: JSON.stringify(payload), env, encoding: "utf8", timeout: 120_000 });
+  const base = { session_id: sid, transcript_path: transcript, cwd: `/${project}` };
+  const start = run({ ...base, hook_event_name: "SessionStart", source: "startup" });
+  run({ ...base, hook_event_name: "SessionEnd", reason: "restore" });
+
+  const fresh = readJson(stateFile);
+  if (!fresh?.url) {
+    if (old) fs.renameSync(`${stateFile}.replaced-${Date.now()}`.replace(/\d+$/, ""), stateFile); // best effort; fine if it fails
+    return console.log(`Restore failed. Hook output: ${(start.stdout || start.stderr || "").trim().slice(0, 300)}`);
+  }
+  const size = fs.statSync(transcript).size;
+  console.log(`Restored from ${path.basename(transcript)} (${Math.round(size / 1024)} KB of transcript).`);
+  console.log(`New link: ${fresh.url}${rest.includes("--keep") ? "  (kept permanently)" : ""}`);
+  if (old?.url) console.log(`The old link ${old.url} stays gone; its id cannot be reused.`);
+  console.log("The title and summary will appear once the AI pass finishes, usually within a few seconds.");
 }
 
 async function setup() {
