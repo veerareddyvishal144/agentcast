@@ -2,24 +2,26 @@
 
 Share a live, link-viewable stream of a Claude Code session: prompts, replies, tool calls, diffs and results, as they happen. When the session ends the link becomes a replay with a timeline scrubber. Links expire after 24 hours by default (see [Link expiration](#link-expiration)).
 
-Runs on Cloudflare Workers: one Worker, one Durable Object per session, Workers AI for titles, static assets for the viewer. No database to run. Production: https://agentcast.agentcast.workers.dev
+**Self-hosted by design.** There is no shared agentcast service. Each user deploys the server into their own Cloudflare account with one command, and their sessions never leave it. The free plan is enough for personal use. Under the hood: one Worker, one Durable Object per session, Workers AI for titles and questions, Vectorize for search, R2 for kept sessions, static assets for the viewer.
 
 ## Layout
 
 ```
-src/index.ts              Worker: HTTP API, viewer route with link-preview tags, rate limiting, static assets
-src/session.ts            SessionDO: per-session event log (SQLite), WebSocket fan-out, passphrase auth, rename, keep/delete, Vectorize indexing, ask, AI summary, R2 archive/evict/rehydrate, expiry alarm
-plugin/                   Claude Code plugin (also the canonical home of the hook)
+plugin/                   Claude Code plugin: hook, CLI, commands, skill, and the server it deploys
+  server/wrangler.jsonc       Worker config (deploy generates wrangler.generated.jsonc minus unavailable bindings)
+  server/src/index.ts         Worker: HTTP API, viewer route with link-preview tags, rate limiting, create-token check, static assets
+  server/src/session.ts       SessionDO: event log (SQLite), WebSocket fan-out, passphrase auth, rename, keep/delete, Vectorize indexing, ask, AI summary, R2 archive/evict/rehydrate, expiry alarm
+  server/public/              Built viewer (committed, so deploys need no build toolchain)
   .claude-plugin/plugin.json  Manifest with userConfig (server_url, passphrase, ai_summary, enabled)
   hooks/hooks.json            SessionStart, UserPromptSubmit, PostToolUse, Stop, SessionEnd
   bin/agentcast-hook.mjs      The hook: tails the transcript, redacts, posts events
-  bin/agentcast.mjs           CLI behind the slash commands: link, status, title, pause, resume, end, keep, unkeep, delete, list, restore, setup
-  bin/install.mjs             Curl-install path: adds/removes the hook in Claude Code settings
-  commands/*.md               /agentcast:link, :status, :title, :pause, :resume, :end, :keep, :unkeep, :delete, :list, :restore, :setup
+  bin/agentcast.mjs           CLI behind the slash commands, including deploy/undeploy (runs wrangler for the user)
+  bin/install.mjs             Curl-install path: adds/removes the hook in Claude Code settings (--url, --token)
+  commands/*.md               /agentcast:link, :status, :title, :pause, :resume, :end, :keep, :unkeep, :delete, :list, :restore, :deploy, :undeploy, :setup
   skills/agentcast/SKILL.md   Teaches Claude when to offer the link and how to use the CLI
   shared/redact.mjs           Secret redaction, shared with the Worker
 .claude-plugin/marketplace.json   Marketplace listing so people can /plugin install agentcast@agentcast
-scripts/sync-dist.mjs     Copies plugin hook files into public/dist for the curl installer (runs before dev/deploy)
+scripts/sync-dist.mjs     Copies hook files into plugin/server/public/dist for the curl installer (maintainer dev/deploy)
 web/                      Frontend: Vite + React 19 + Tailwind v4 + shadcn/ui (Radix "nova" style)
   src/pages/landing-app.tsx   Landing page with a self-playing demo session
   src/pages/viewer-app.tsx    Session viewer: transcript, outline, replay dock, ask panel, passphrase gate
@@ -28,12 +30,11 @@ web/                      Frontend: Vite + React 19 + Tailwind v4 + shadcn/ui (R
   src/hooks/use-replay.ts     Replay cursor, play/pause, speed
   src/components/             Timeline, tool cards with diff rendering, markdown, header, dock
   public/                     install.sh, og.png, favicon (copied into the build)
-public/                   Build output served by the Worker (generated, not committed)
 ```
 
 ## Frontend
 
-The UI is a two-page Vite app in `web/` that compiles into `public/`. `npm run dev` and `npm run deploy` at the repo root build it first.
+The UI is a Vite app in `web/` that compiles into `plugin/server/public/` (committed, so the plugin can deploy without a build step). `npm run dev` and `npm run deploy` at the repo root build it first; remember to commit the rebuilt assets.
 
 ```sh
 cd web && npm install
@@ -43,40 +44,46 @@ npx shadcn@latest add <component>   # add more shadcn components
 
 Dark theme by default with a light toggle, Geist font self-hosted, no runtime CSS-in-JS. The viewer page gets its Open Graph tags injected by the Worker, so the HTML template keeps a plain `<title>` placeholder.
 
-## Install (users)
+## Install and deploy (users)
 
-**As a Claude Code plugin (recommended).** Until the repo is public on GitHub, point the marketplace at a local checkout:
+Prerequisites: Claude Code and Node 18+. A Cloudflare account is created during the deploy step if you do not have one (free).
 
 ```
-/plugin marketplace add /path/to/agentcast     # or: /plugin marketplace add <github-user>/agentcast
+/plugin marketplace add <github-user>/agentcast     # until the repo is public: /plugin marketplace add /path/to/agentcast
 /plugin install agentcast@agentcast
+/agentcast:deploy
 ```
 
-Then start a new session. The share link appears as a system message. Configure in the plugin settings: `server_url`, `passphrase`, `ai_summary`, `enabled`, `retention` (`24h`, `7d`, `30d`, or `forever`).
+`/agentcast:deploy` runs wrangler from the plugin's bundled server directory: it logs you into Cloudflare in the browser if needed, creates the Vectorize index and R2 bucket (skipping either if your account cannot have it), deploys the Worker to `https://agentcast.<your-subdomain>.workers.dev`, generates a private **create token** and stores it as a Worker secret, and writes `server_url` and `create_token` into the plugin settings. Re-run it any time to upgrade; data is kept. `/agentcast:undeploy` removes the Worker (add `--delete-data` for the index and bucket).
 
-Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:list`, `/agentcast:restore`, `/agentcast:setup`.
+Until a server is configured the hook prints one reminder per session and streams nothing.
 
-To see the links this machine has created: `/agentcast:list`, or `node plugin/bin/agentcast.mjs list [--hours 24 | --all] [--titles]`. The list comes from the hook's local state in `~/.agentcast/sessions`; there is no server-side index because sessions are isolated and there are no accounts. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
+Plugin settings: `server_url`, `create_token` (both set by deploy), `passphrase`, `ai_summary`, `enabled`, `retention` (`24h`, `7d`, `30d`, or `forever`).
+
+Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:list`, `/agentcast:restore`, `/agentcast:deploy`, `/agentcast:undeploy`, `/agentcast:setup`. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
 
 To try the plugin from a checkout without installing: `claude --plugin-dir ./plugin`.
 
-**With curl (no plugin system).**
+**Without the plugin system (curl).** Deploy the server first (`npm run deploy` from a checkout, or the plugin's deploy), then install the hook from your own server, passing your create token:
 
 ```sh
-curl -fsSL https://agentcast.agentcast.workers.dev/install.sh | sh                      # every project
-curl -fsSL https://agentcast.agentcast.workers.dev/install.sh | sh -s -- --project ~/repo  # one project
-curl -fsSL https://agentcast.agentcast.workers.dev/install.sh | sh -s -- --uninstall
+curl -fsSL https://agentcast.<you>.workers.dev/install.sh | sh -s -- --url https://agentcast.<you>.workers.dev --token <create token>
+curl -fsSL https://agentcast.<you>.workers.dev/install.sh | sh -s -- --url ... --token ... --project ~/repo   # one project
+curl -fsSL https://agentcast.<you>.workers.dev/install.sh | sh -s -- --uninstall
 ```
 
 Environment variables read by the hook (plugin settings take precedence):
 
 | Variable | Effect |
 |---|---|
+| `AGENTCAST_URL` | Your server. Nothing streams without it |
+| `AGENTCAST_CREATE_TOKEN` | The create token your server requires |
 | `AGENTCAST_PASSPHRASE` | Viewers must enter this passphrase before anything loads |
-| `AGENTCAST_NO_AI=1` | Skip the AI-generated title and summary at session end |
-| `AGENTCAST_DISABLE=1` | Do nothing |
-| `AGENTCAST_URL` | Point at a different server (set by the installer) |
 | `AGENTCAST_RETENTION` | `24h` (default), `7d`, `30d`, `forever`, or a number of hours; capped by the server's `MAX_TTL_HOURS` |
+| `AGENTCAST_NO_AI=1` | Skip the AI-generated title, summary and question box |
+| `AGENTCAST_DISABLE=1` | Do nothing |
+
+**Create token.** When the `CREATE_TOKEN` secret is set on a server, `POST /api/sessions` requires the `x-agentcast-create-token` header. Viewers never need it; links stay shareable. Without it anyone who learns your Worker address could use it as a free agentcast server.
 
 ## Viewer features
 
@@ -97,14 +104,19 @@ npm run dev                                  # builds the frontend, syncs public
 node hook/install.mjs --url http://127.0.0.1:8787 --project ~/some-repo
 ```
 
-## Deploy
+## Deploy (maintainer / from a checkout)
 
 ```sh
 npx wrangler login
+npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine
+npx wrangler r2 bucket create agentcast-archive
 npm run deploy
+npx wrangler secret put CREATE_TOKEN -c plugin/server/wrangler.jsonc   # paste a long random string
 ```
 
-Config lives in `wrangler.jsonc`: Durable Object binding, Workers AI binding, a Vectorize index (`agentcast-sessions`, 384 dimensions, cosine; create it once with `npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine`), an R2 bucket (`agentcast-archive`) for kept sessions, two rate limiters (20 session creations and 30 questions per IP per minute), and vars for TTL, max TTL, archive eviction delay, event cap, and the answer and embedding models.
+Users do not do this; `/agentcast:deploy` does the equivalent for them.
+
+Config lives in `plugin/server/wrangler.jsonc`: Durable Object binding, Workers AI binding, a Vectorize index (`agentcast-sessions`, 384 dimensions, cosine; create it once with `npx wrangler vectorize create agentcast-sessions --dimensions=384 --metric=cosine`), an R2 bucket (`agentcast-archive`) for kept sessions, two rate limiters (20 session creations and 30 questions per IP per minute), and vars for TTL, max TTL, archive eviction delay, event cap, and the answer and embedding models.
 
 ## Session lifecycle
 
@@ -167,7 +179,8 @@ Fractional hours work (`"0.5"` is 30 minutes). Values set in the Cloudflare dash
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/sessions` | none, rate limited | Create session. Body `{ title?, agent?, project?, model?, passphrase?, ai?, keep?, ttlHours? }`. Returns `{ id, token, url, expiresAt, kept, protected }` |
+| GET | `/api/version` | none | `{ version, requiresCreateToken, features }` |
+| POST | `/api/sessions` | create token if set, rate limited | Create session. Body `{ title?, agent?, project?, model?, passphrase?, ai?, keep?, ttlHours? }`. Returns `{ id, token, url, expiresAt, kept, protected }` |
 | POST | `/api/sessions/:id/events` | `Authorization: Bearer <token>` | Append `{ events: [...], meta?: { title?, model? } }` |
 | POST | `/api/sessions/:id/end` | Bearer token | Mark ended; triggers the AI summary |
 | PATCH | `/api/sessions/:id` | Bearer token | Rename: `{ title }`. Locks the title against AI renaming |
@@ -203,4 +216,4 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 
 ## Not yet built
 
-Accounts (needs an identity provider decision), comments, approval mode, inactivity auto-end for crashed sessions, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace.
+Accounts (needs an identity provider decision), comments, approval mode, inactivity auto-end for crashed sessions, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace, a Deploy-to-Cloudflare button for non-Claude users.

@@ -5,7 +5,7 @@ export { SessionDO };
 const CORS: Record<string, string> = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
-  "access-control-allow-headers": "authorization,content-type,x-agentcast-key",
+  "access-control-allow-headers": "authorization,content-type,x-agentcast-key,x-agentcast-create-token",
 };
 const ID_RE = /^[a-z0-9]{6,32}$/;
 const MAX_BODY = 5 * 1024 * 1024;
@@ -92,10 +92,17 @@ async function viewerPage(env: Env, url: URL, id: string): Promise<Response> {
 
 async function handleApi(req: Request, env: Env, url: URL): Promise<Response> {
   const parts = url.pathname.split("/").filter(Boolean); // ["api","sessions",id?,sub?]
+  if (parts[1] === "version" && req.method === "GET") {
+    return json({ version: env.AGENTCAST_VERSION ?? "dev", requiresCreateToken: !!env.CREATE_TOKEN, features: { ai: !!env.AI, search: !!env.VECTORS, archive: !!env.ARCHIVE } });
+  }
   if (parts[1] !== "sessions") return json({ error: "not found" }, 404);
 
   if (parts.length === 2) {
     if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
+    if (env.CREATE_TOKEN) {
+      const presented = req.headers.get("x-agentcast-create-token") || "";
+      if (!constantTimeEqual(presented, env.CREATE_TOKEN)) return json({ error: "this server requires a create token; run /agentcast:deploy or set create_token in the plugin settings" }, 401);
+    }
     return createSession(req, env, url);
   }
 
@@ -259,6 +266,13 @@ function esc(s: string): string {
 
 function attr(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 function shortId(len: number): string {

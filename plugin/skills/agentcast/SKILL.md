@@ -5,7 +5,7 @@ description: Share, stream or record the current Claude Code session as a live l
 
 # agentcast
 
-agentcast streams this Claude Code session to a web page anyone with the link can open. The plugin hook does this automatically; you never need to post events yourself. Your job is to answer questions about it and run the small CLI when the user asks.
+agentcast streams this Claude Code session to a web page anyone with the link can open, served from the user's **own** Cloudflare account. There is no shared hosted service: until the user runs /agentcast:deploy, nothing streams anywhere. The plugin hook handles streaming automatically; your job is to answer questions about it and run the small CLI when the user asks.
 
 ## CLI
 
@@ -21,12 +21,16 @@ node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" keep | unkeep        # keep the l
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" delete --yes         # delete the session now (confirm with the user first)
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" list [--hours 24|--all] [--titles]   # links this machine created
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" restore --link <id> [--keep]      # re-publish an expired session from the local transcript
+node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" deploy               # create/upgrade the user's own server (opens Cloudflare login if needed)
+node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" undeploy [--delete-data]   # remove it (confirm first)
 node "${CLAUDE_PLUGIN_ROOT}/bin/agentcast.mjs" setup                # check config and connectivity
 ```
 
-The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:keep, /agentcast:unkeep, /agentcast:delete, /agentcast:list, /agentcast:restore, /agentcast:setup.
+The same actions exist as slash commands: /agentcast:link, /agentcast:status, /agentcast:title, /agentcast:pause, /agentcast:resume, /agentcast:end, /agentcast:keep, /agentcast:unkeep, /agentcast:delete, /agentcast:list, /agentcast:restore, /agentcast:deploy, /agentcast:undeploy, /agentcast:setup.
 
 ## What to tell users
+
+- Where the data goes: to a Worker in the user's own Cloudflare account, created by /agentcast:deploy. Nobody else operates it. The free plan is enough for personal use.
 
 - Shared: user prompts, your replies, tool calls with inputs, and tool results. Not shared: your thinking, subagent transcripts, injected system reminders, full filesystem paths (only the project folder name).
 - Common secret formats are redacted on their machine before upload and again on the server, but they should still avoid pasting secrets into a streamed session.

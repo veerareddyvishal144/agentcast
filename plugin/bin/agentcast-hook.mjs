@@ -8,7 +8,8 @@
 //
 // Configuration, first match wins:
 //   plugin setting            env var                 meaning
-//   server_url                AGENTCAST_URL           server origin (default: hosted agentcast)
+//   server_url                AGENTCAST_URL           your agentcast server (set by /agentcast:deploy); nothing streams until this is set
+//   create_token              AGENTCAST_CREATE_TOKEN  token your server requires to create sessions (set by /agentcast:deploy)
 //   passphrase                AGENTCAST_PASSPHRASE    viewers must enter this passphrase
 //   ai_summary (true/false)   AGENTCAST_NO_AI=1       AI-generated title and summary at session end
 //   enabled (true/false)      AGENTCAST_DISABLE=1     turn streaming off entirely
@@ -20,7 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { redactDeep, redactText } from "../shared/redact.mjs";
 
-export const HOSTED_URL = "https://agentcast.agentcast.workers.dev";
+export const PLUGIN_VERSION = "0.4.0";
 export const HOME_DIR = path.join(os.homedir(), ".agentcast");
 export const STATE_DIR = path.join(HOME_DIR, "sessions");
 const BACKOFF_FILE = path.join(HOME_DIR, "backoff.json");
@@ -28,18 +29,35 @@ const CURRENT_FILE = path.join(HOME_DIR, "current");
 const LIMITS = { text: 32_000, string: 6_000, toolResult: 10_000, batch: 150 };
 const TIMEOUT_MS = 5_000;
 
+/** Plugin settings as written by /agentcast:deploy or the /plugin UI: ~/.claude/settings.json → pluginConfigs.agentcast */
+export function pluginSettings() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "settings.json"), "utf8"));
+    const c = s.pluginConfigs || {};
+    return c.agentcast || Object.entries(c).find(([k]) => k.startsWith("agentcast@"))?.[1] || {};
+  } catch { return {}; }
+}
+
+// Precedence: CLAUDE_PLUGIN_OPTION_* (set by Claude Code for plugin hooks) > AGENTCAST_* env > plugin settings file > defaults.
 export function resolveConfig(env = process.env) {
+  const file = pluginSettings();
   const opt = (name) => {
     const v = env[`CLAUDE_PLUGIN_OPTION_${name}`];
-    return v === undefined || v === "" ? undefined : v;
+    if (v !== undefined && v !== "") return v;
+    return undefined;
+  };
+  const fromFile = (key) => {
+    const v = file[key];
+    return v === undefined || v === null || v === "" ? undefined : String(v);
   };
   const bool = (v, fallback) => (v === undefined ? fallback : !/^(false|0|no|off)$/i.test(String(v)));
   return {
-    serverUrl: (opt("SERVER_URL") || env.AGENTCAST_URL || HOSTED_URL).replace(/\/+$/, ""),
-    passphrase: opt("PASSPHRASE") || env.AGENTCAST_PASSPHRASE || undefined,
-    aiSummary: bool(opt("AI_SUMMARY"), env.AGENTCAST_NO_AI !== "1"),
-    enabled: bool(opt("ENABLED"), env.AGENTCAST_DISABLE !== "1"),
-    retention: parseRetention(opt("RETENTION") || env.AGENTCAST_RETENTION),
+    serverUrl: (opt("SERVER_URL") || env.AGENTCAST_URL || fromFile("server_url") || "").replace(/\/+$/, ""),
+    createToken: opt("CREATE_TOKEN") || env.AGENTCAST_CREATE_TOKEN || fromFile("create_token") || undefined,
+    passphrase: opt("PASSPHRASE") || env.AGENTCAST_PASSPHRASE || fromFile("passphrase") || undefined,
+    aiSummary: bool(opt("AI_SUMMARY") ?? (env.AGENTCAST_NO_AI === "1" ? "false" : undefined) ?? fromFile("ai_summary"), true),
+    enabled: bool(opt("ENABLED") ?? (env.AGENTCAST_DISABLE === "1" ? "false" : undefined) ?? fromFile("enabled"), true),
+    retention: parseRetention(opt("RETENTION") || env.AGENTCAST_RETENTION || fromFile("retention")),
   };
 }
 
@@ -64,6 +82,12 @@ async function main() {
   const payload = parse(await readStdin());
   if (!payload || !payload.session_id) return;
   const { session_id, transcript_path, cwd, hook_event_name } = payload;
+
+  if (!cfg.serverUrl) {
+    // Installed but not deployed: say so once per session, then stay out of the way.
+    if (hook_event_name === "SessionStart") emit("agentcast is installed but has no server yet. Run /agentcast:deploy to set one up in your own Cloudflare account (free, about a minute). Nothing is streamed until then.");
+    return;
+  }
 
   fs.mkdirSync(STATE_DIR, { recursive: true });
   fs.writeFileSync(CURRENT_FILE, session_id + "\n");
@@ -91,8 +115,9 @@ async function main() {
       passphrase: cfg.passphrase,
       ai: cfg.aiSummary,
       ...cfg.retention,
-    });
+    }, null, cfg.createToken ? { "x-agentcast-create-token": cfg.createToken } : {});
     if (created.status !== 201 || !created.body?.id) {
+      if (created.status === 401 && hook_event_name === "SessionStart") emit(`agentcast: ${created.body?.error || "the server refused to create a session"}`);
       if (created.status === 0 || created.status >= 500) setBackoff();
       return;
     }
@@ -307,11 +332,11 @@ export async function postEvents(cfg, state, events, patch) {
   return true;
 }
 
-export async function http(method, url, body, token) {
+export async function http(method, url, body, token, extraHeaders = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   try {
-    const headers = { "content-type": "application/json" };
+    const headers = { "content-type": "application/json", ...extraHeaders };
     if (token) headers.authorization = `Bearer ${token}`;
     const r = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: ctl.signal });
     const text = await r.text();

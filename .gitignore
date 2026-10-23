@@ -3,4 +3,6 @@ node_modules
 .dev.vars
 *.log
 public/dist
-public/
+plugin/server/public/dist/
+plugin/server/wrangler.generated.jsonc
+plugin/server/.wrangler/

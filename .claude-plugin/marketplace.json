@@ -9,8 +9,8 @@
     {
       "name": "agentcast",
       "source": "./plugin",
-      "description": "Stream your Claude Code session to a shareable live link, with replay when it ends.",
-      "version": "0.3.0",
+      "description": "Stream your Claude Code session to a shareable live link, served from your own Cloudflare account.",
+      "version": "0.4.0",
       "category": "productivity"
     }
   ]

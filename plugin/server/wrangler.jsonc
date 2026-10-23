@@ -23,6 +23,7 @@
     "AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
     "EMBED_MODEL": "@cf/baai/bge-small-en-v1.5",
     "MAX_TTL_HOURS": "8760",
-    "ARCHIVE_EVICT_HOURS": "24"
+    "ARCHIVE_EVICT_HOURS": "24",
+    "AGENTCAST_VERSION": "0.4.0"
   }
 }

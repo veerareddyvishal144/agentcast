@@ -11,13 +11,16 @@ import { fileURLToPath } from "node:url";
 const args = process.argv.slice(2);
 const uninstall = args.includes("--uninstall");
 const urlIdx = args.indexOf("--url");
-const url = urlIdx >= 0 ? args[urlIdx + 1] : "http://localhost:8787";
+const url = urlIdx >= 0 ? args[urlIdx + 1] : null;
+const tokenIdx = args.indexOf("--token");
+const token = tokenIdx >= 0 ? args[tokenIdx + 1] : null;
+if (!uninstall && !url) { console.log("Usage: node install.mjs --url https://agentcast.<you>.workers.dev [--token <create token>] [--project <dir>]"); process.exit(1); }
 const projIdx = args.indexOf("--project");
 const settingsFile = projIdx >= 0
   ? path.join(path.resolve(args[projIdx + 1]), ".claude", "settings.json")
   : path.join(os.homedir(), ".claude", "settings.json");
 const hookPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "agentcast-hook.mjs");
-const command = `AGENTCAST_URL=${url} node ${JSON.stringify(hookPath)}`;
+const command = `AGENTCAST_URL=${url}${token ? ` AGENTCAST_CREATE_TOKEN=${token}` : ""} node ${JSON.stringify(hookPath)}`;
 const EVENTS = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop", "SessionEnd"];
 
 let settings = {};

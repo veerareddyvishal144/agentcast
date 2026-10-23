@@ -12,8 +12,8 @@ const files = [
   ["plugin/shared/redact.mjs", "shared/redact.mjs"],
 ];
 for (const [src, rel] of files) {
-  const dest = path.join(root, "public", "dist", rel);
+  const dest = path.join(root, "plugin", "server", "public", "dist", rel);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.copyFileSync(path.join(root, src), dest);
 }
-console.log(`synced ${files.length} files to public/dist`);
+console.log(`synced ${files.length} files to plugin/server/public/dist`);

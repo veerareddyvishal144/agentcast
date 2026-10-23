@@ -5,10 +5,10 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev -c plugin/server/wrangler.jsonc",
+    "deploy": "wrangler deploy -c plugin/server/wrangler.jsonc",
     "typecheck": "tsc --noEmit",
-    "tail": "wrangler tail",
+    "tail": "wrangler tail -c plugin/server/wrangler.jsonc",
     "sync": "node scripts/sync-dist.mjs",
     "predev": "npm run build:web && npm run sync",
     "predeploy": "npm run build:web && npm run sync",

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { redactDeep, redactText } from "../plugin/shared/redact.mjs";
+import { redactDeep, redactText } from "../../shared/redact.mjs";
 
 export interface Env {
   SESSIONS: DurableObjectNamespace<SessionDO>;
@@ -8,6 +8,8 @@ export interface Env {
   VECTORS?: VectorizeIndex;
   ARCHIVE?: R2Bucket;
   ARCHIVE_EVICT_HOURS: string;
+  CREATE_TOKEN?: string;      // secret; when set, only hooks presenting it may create sessions
+  AGENTCAST_VERSION?: string;
   CREATE_LIMITER?: RateLimit;
   ASK_LIMITER?: RateLimit;
   SESSION_TTL_HOURS: string;

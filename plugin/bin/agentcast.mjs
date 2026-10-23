@@ -11,6 +11,10 @@
 //                                          links this machine created recently (newest first)
 //   node agentcast.mjs restore --session <claude-session-id> | --link <agentcast-id-or-url> [--keep]
 //                                          re-publish an expired/deleted session from the local Claude Code transcript (new link)
+//   node agentcast.mjs deploy [--name agentcast]
+//                                          set up or upgrade YOUR agentcast server in your own Cloudflare account
+//   node agentcast.mjs undeploy [--name agentcast] [--delete-data]
+//                                          remove it again
 //   node agentcast.mjs setup               check Node, server reachability and configuration
 // Options: --session <claude-session-id>  (default: the most recent session the hook saw)
 
@@ -19,7 +23,8 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { HOME_DIR, STATE_DIR, endSession, http, readJson, resolveConfig, writeJson } from "./agentcast-hook.mjs";
+import { HOME_DIR, PLUGIN_VERSION, STATE_DIR, endSession, http, readJson, resolveConfig, writeJson } from "./agentcast-hook.mjs";
+import { randomBytes } from "node:crypto";
 
 const args = process.argv.slice(2);
 const cmd = args[0] || "status";
@@ -27,6 +32,8 @@ const sessionIdx = args.indexOf("--session");
 const sessionId = sessionIdx >= 0 ? args[sessionIdx + 1] : null;
 const rest = args.slice(1).filter((a, i, all) => a !== "--session" && all[i - 1] !== "--session");
 const cfg = resolveConfig();
+const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "server");
+const SETTINGS_FILE = path.join(os.homedir(), ".claude", "settings.json");
 
 main().catch((err) => { console.log(`agentcast: ${err.message}`); process.exit(0); });
 
@@ -43,6 +50,8 @@ async function main() {
     case "delete": return del();
     case "list": return list();
     case "restore": return restore();
+    case "deploy": return deploy();
+    case "undeploy": return undeploy();
     case "setup": return setup();
     default: console.log(`Unknown command "${cmd}". Use link, status, title, pause, resume, end, keep, unkeep, delete, list or setup.`);
   }
@@ -57,7 +66,7 @@ function current() {
 
 function link() {
   const { state } = current();
-  if (!state) return console.log("No agentcast session yet. Streaming starts when a new Claude Code session begins. Run `agentcast setup` to check configuration.");
+  if (!state || state.deleted) return console.log("No agentcast session yet. Streaming starts when a new Claude Code session begins. Run `agentcast setup` to check configuration.");
   console.log(`${state.url}${state.protected ? "  (passphrase protected)" : ""}`);
   if (state.disabled) console.log("This session has ended; the link stays available for 24 hours after it started.");
   else if (state.paused) console.log("Streaming is paused. Use `agentcast resume` to continue.");
@@ -65,7 +74,7 @@ function link() {
 
 async function status() {
   const { id, state } = current();
-  console.log(`server:   ${cfg.serverUrl}`);
+  console.log(`server:   ${cfg.serverUrl || "none configured (run /agentcast:deploy)"}`);
   console.log(`enabled:  ${cfg.enabled}   passphrase: ${cfg.passphrase ? "set" : "none"}   ai summary: ${cfg.aiSummary}`);
   if (!state) return console.log("session:  none yet");
   console.log(`session:  ${id}`);
@@ -212,12 +221,163 @@ async function restore() {
   console.log("The title and summary will appear once the AI pass finishes, usually within a few seconds.");
 }
 
+// ---------- self-hosting ----------
+
+function wrangler(args, { interactive = false, input, timeout = 240_000 } = {}) {
+  const env = { ...process.env, WRANGLER_SEND_METRICS: "false" };
+  if (!interactive) env.CI = "true";
+  const r = spawnSync("npx", ["-y", "wrangler@4", ...args], { cwd: SERVER_DIR, encoding: "utf8", env, input, stdio: interactive ? "inherit" : "pipe", timeout });
+  return { status: r.status, out: `${r.stdout || ""}${r.stderr || ""}` };
+}
+
+function readSettings() { return readJson(SETTINGS_FILE) || {}; }
+function pluginConfig() { return readSettings().pluginConfigs?.agentcast || {}; }
+function writePluginConfig(patch) {
+  const settings = readSettings();
+  settings.pluginConfigs ||= {};
+  settings.pluginConfigs.agentcast = { ...(settings.pluginConfigs.agentcast || {}), ...patch };
+  for (const k of Object.keys(settings.pluginConfigs.agentcast)) if (settings.pluginConfigs.agentcast[k] === undefined) delete settings.pluginConfigs.agentcast[k];
+  fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2) + "\n");
+}
+
+function loadServerConfig() {
+  const raw = fs.readFileSync(path.join(SERVER_DIR, "wrangler.jsonc"), "utf8");
+  try { return JSON.parse(raw); } catch { return JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[}\]])/g, "$1")); }
+}
+
+function syncDist() {
+  for (const [src, rel] of [["bin/agentcast-hook.mjs", "hook/agentcast-hook.mjs"], ["bin/install.mjs", "hook/install.mjs"], ["shared/redact.mjs", "shared/redact.mjs"]]) {
+    const dest = path.join(SERVER_DIR, "public", "dist", rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(path.join(SERVER_DIR, "..", src), dest);
+  }
+}
+
+async function deploy() {
+  const nameIdx = rest.indexOf("--name");
+  const name = (nameIdx >= 0 && rest[nameIdx + 1]) || "agentcast";
+  const [major] = process.versions.node.split(".").map(Number);
+  if (major < 18) return console.log(`Node ${process.versions.node} is too old; agentcast needs Node 18 or newer.`);
+  if (!fs.existsSync(path.join(SERVER_DIR, "public", "viewer.html"))) return console.log(`The plugin is missing its server build (${SERVER_DIR}/public). Reinstall or update the plugin.`);
+
+  console.log(`agentcast ${PLUGIN_VERSION}: deploying "${name}" to your Cloudflare account. First run downloads wrangler, so give it a minute.`);
+
+  // 1. Login
+  let who = wrangler(["whoami"]);
+  if (!/logged in/i.test(who.out)) {
+    console.log("Not logged in to Cloudflare. A browser window will open; finish the login there (a free account is enough).");
+    wrangler(["login"], { interactive: true, timeout: 600_000 });
+    who = wrangler(["whoami"]);
+    if (!/logged in/i.test(who.out)) return console.log("Cloudflare login did not complete. Run `npx wrangler login` yourself, then re-run deploy.");
+  }
+  const email = /email ([^\s]+@[^\s.]+(?:\.[^\s.]+)+)/i.exec(who.out)?.[1];
+  console.log(`Logged in${email ? ` as ${email}` : ""}.`);
+
+  // 2. Provision optional resources; each one that fails is simply left out of the deploy.
+  const features = { vectorize: false, archive: false };
+  if (wrangler(["vectorize", "get", "agentcast-sessions"]).status === 0) features.vectorize = true;
+  else {
+    const vx = wrangler(["vectorize", "create", "agentcast-sessions", "--dimensions=384", "--metric=cosine"]);
+    features.vectorize = vx.status === 0 || /duplicate|already exists/i.test(vx.out);
+  }
+  console.log(features.vectorize ? "Search index: ready (Vectorize)." : "Search index: unavailable on this account; questions will use keyword search only.");
+  const r2 = wrangler(["r2", "bucket", "create", "agentcast-archive"]);
+  features.archive = r2.status === 0 || /duplicate|already exists|already own/i.test(r2.out);
+  console.log(features.archive ? "Archive bucket: ready (R2)." : "Archive bucket: unavailable (R2 may need to be enabled in the dashboard); kept sessions will stay in Durable Object storage.");
+
+  // 3. Generated config = committed config minus whatever this account cannot have.
+  const cfg0 = loadServerConfig();
+  cfg0.name = name;
+  delete cfg0.$schema;
+  if (!features.vectorize) delete cfg0.vectorize;
+  if (!features.archive) delete cfg0.r2_buckets;
+  const genPath = path.join(SERVER_DIR, "wrangler.generated.jsonc");
+  const writeGen = () => fs.writeFileSync(genPath, JSON.stringify(cfg0, null, 2));
+  writeGen();
+  syncDist();
+
+  // 4. Deploy, dropping bindings the account rejects.
+  let dep;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    dep = wrangler(["deploy", "-c", "wrangler.generated.jsonc"], { timeout: 300_000 });
+    if (dep.status === 0) break;
+    const o = dep.out.toLowerCase();
+    if (cfg0.ratelimits && /ratelimit|rate limit/.test(o)) { delete cfg0.ratelimits; console.log("Rate limiting binding not available; continuing without it."); }
+    else if (cfg0.ai && /workers ai|\bai\b.*binding|binding.*\bai\b/.test(o)) { delete cfg0.ai; console.log("Workers AI not available; continuing without summaries and questions."); }
+    else if (cfg0.vectorize && /vectorize/.test(o)) { delete cfg0.vectorize; console.log("Vectorize rejected; continuing without semantic search."); }
+    else if (cfg0.r2_buckets && /\br2\b|bucket/.test(o)) { delete cfg0.r2_buckets; console.log("R2 rejected; continuing without archival."); }
+    else break;
+    writeGen();
+  }
+  if (!dep || dep.status !== 0) {
+    console.log("Deploy failed. wrangler said:\n" + dep?.out.trim().split("\n").slice(-25).join("\n"));
+    return;
+  }
+  const url = /https:\/\/[a-z0-9.-]+\.workers\.dev/i.exec(dep.out)?.[0];
+  if (!url) {
+    console.log("Deployed, but no workers.dev address was reported. Enable a workers.dev subdomain in the Cloudflare dashboard (Workers & Pages → Overview → your subdomain), then re-run `/agentcast:deploy`.");
+    return;
+  }
+
+  // 5. Create token: reuse the one in plugin settings so upgrades do not invalidate hooks.
+  const existing = pluginConfig().create_token;
+  const token = existing || randomBytes(24).toString("hex");
+  const sec = wrangler(["secret", "put", "CREATE_TOKEN", "-c", "wrangler.generated.jsonc"], { input: token + "\n" });
+  const tokenOk = sec.status === 0;
+  if (!tokenOk) console.log("Warning: could not store the create token as a secret; the server will accept session creation from anyone until you set CREATE_TOKEN.");
+
+  // 6. Point the plugin at the new server.
+  writePluginConfig({ server_url: url, ...(tokenOk ? { create_token: token } : {}) });
+
+  // 7. Verify, waiting briefly for the secret to propagate.
+  let ver = await http("GET", `${url}/api/version`, null, null);
+  for (let i = 0; i < 10 && tokenOk && ver.body && !ver.body.requiresCreateToken; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    ver = await http("GET", `${url}/api/version`, null, null);
+  }
+  console.log("");
+  console.log(`Done. Your agentcast server is ${url}`);
+  console.log(`  version ${ver.body?.version ?? "?"} · search ${ver.body?.features?.search ? "on" : "off"} · archive ${ver.body?.features?.archive ? "on" : "off"} · AI ${ver.body?.features?.ai ? "on" : "off"} · create token ${ver.body?.requiresCreateToken ? "required" : "NOT set"}`);
+  console.log(`  plugin settings updated (server_url${tokenOk ? ", create_token" : ""}) in ${SETTINGS_FILE}`);
+  console.log("Start a new Claude Code session and the share link will appear. Re-run deploy any time to upgrade; data is kept.");
+  if (tokenOk) console.log(`If you also use the curl-installed hook: curl -fsSL ${url}/install.sh | sh -s -- --url ${url} --token <create token from your plugin settings>`);
+}
+
+async function undeploy() {
+  const nameIdx = rest.indexOf("--name");
+  const name = (nameIdx >= 0 && rest[nameIdx + 1]) || "agentcast";
+  const genPath = path.join(SERVER_DIR, "wrangler.generated.jsonc");
+  if (!fs.existsSync(genPath)) { const c = loadServerConfig(); c.name = name; delete c.$schema; fs.writeFileSync(genPath, JSON.stringify(c, null, 2)); }
+  const del = wrangler(["delete", "-c", "wrangler.generated.jsonc", "--name", name, "--force"], { timeout: 180_000 });
+  console.log(del.status === 0 ? `Worker "${name}" deleted.` : `Could not delete Worker "${name}":\n${del.out.trim().split("\n").slice(-6).join("\n")}`);
+  if (rest.includes("--delete-data")) {
+    const vx = wrangler(["vectorize", "delete", "agentcast-sessions", "--force"]);
+    console.log(vx.status === 0 ? "Search index deleted." : "Search index not deleted (it may not exist).");
+    const r2 = wrangler(["r2", "bucket", "delete", "agentcast-archive"]);
+    console.log(r2.status === 0 ? "Archive bucket deleted." : "Archive bucket not deleted: empty it in the dashboard first (Cloudflare refuses to delete non-empty buckets), then re-run.");
+  } else {
+    console.log("Kept the search index and archive bucket. Add --delete-data to remove them too.");
+  }
+  const cfg = pluginConfig();
+  if (cfg.server_url) { writePluginConfig({ server_url: undefined, create_token: undefined }); console.log("Plugin settings cleared; nothing will stream until you deploy again."); }
+}
+
 async function setup() {
   const [major] = process.versions.node.split(".").map(Number);
-  console.log(`node:       v${process.versions.node} ${major >= 18 ? "ok" : "too old, need 18+"}`);
+  console.log(`plugin:     ${PLUGIN_VERSION}   node v${process.versions.node} ${major >= 18 ? "ok" : "too old, need 18+"}`);
+  if (!cfg.serverUrl) {
+    console.log("server:     none configured. Run /agentcast:deploy to create one in your own Cloudflare account (free). Nothing streams until then.");
+    return;
+  }
   console.log(`server:     ${cfg.serverUrl}`);
-  const ping = await http("GET", `${cfg.serverUrl}/`, null, null);
-  console.log(`reachable:  ${ping.status === 200 ? "yes" : `no (${ping.status || ping.error})`}`);
+  const ver = await http("GET", `${cfg.serverUrl}/api/version`, null, null);
+  console.log(`reachable:  ${ver.status === 200 ? `yes, server version ${ver.body?.version ?? "?"}` : `no (${ver.status || ver.error})`}`);
+  if (ver.status === 200) {
+    console.log(`features:   search ${ver.body?.features?.search ? "on" : "off"} · archive ${ver.body?.features?.archive ? "on" : "off"} · AI ${ver.body?.features?.ai ? "on" : "off"}`);
+    console.log(`token:      server ${ver.body?.requiresCreateToken ? "requires" : "does not require"} a create token; plugin has ${cfg.createToken ? "one" : "none"}${ver.body?.requiresCreateToken && !cfg.createToken ? "  <- sessions will be refused; re-run /agentcast:deploy" : ""}`);
+    if (ver.body?.version && ver.body.version !== "dev" && ver.body.version !== PLUGIN_VERSION) console.log(`note:       server ${ver.body.version} differs from plugin ${PLUGIN_VERSION}; run /agentcast:deploy to upgrade the server`);
+  }
   console.log(`enabled:    ${cfg.enabled}`);
   console.log(`passphrase: ${cfg.passphrase ? "set (viewers must enter it)" : "none (anyone with the link can view)"}`);
   console.log(`ai summary: ${cfg.aiSummary ? "on" : "off"}`);
@@ -225,7 +385,7 @@ async function setup() {
   console.log(`state dir:  ${HOME_DIR}`);
   console.log("shared:     prompts, replies, tool calls and results. Never shared: thinking, subagent chatter, full paths. Secrets are redacted before upload.");
   const { state } = current();
-  if (state) console.log(`current:    ${state.url}`);
+  if (state && !state.deleted) console.log(`current:    ${state.url}${state.disabled ? " (ended)" : ""}`);
 }
 
 function readText(file) {

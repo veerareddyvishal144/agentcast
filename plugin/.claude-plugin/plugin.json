@@ -1,8 +1,8 @@
 {
   "name": "agentcast",
   "displayName": "agentcast",
-  "version": "0.3.0",
-  "description": "Stream your Claude Code session to a shareable live link. Viewers watch prompts, replies, tool calls and diffs as they happen, then replay when it ends.",
+  "version": "0.4.0",
+  "description": "Stream your Claude Code session to a shareable live link served from your own Cloudflare account. Viewers watch prompts, replies, tool calls and diffs as they happen, then replay when it ends.",
   "author": {
     "name": "Vishal Veera Reddy"
   },
@@ -19,7 +19,13 @@
     "server_url": {
       "type": "string",
       "title": "Server URL",
-      "description": "agentcast server to stream to. Leave empty for the hosted service at https://agentcast.agentcast.workers.dev"
+      "description": "Your agentcast Worker, e.g. https://agentcast.<you>.workers.dev. /agentcast:deploy fills this in. Nothing streams until it is set."
+    },
+    "create_token": {
+      "type": "string",
+      "title": "Create token",
+      "description": "Secret your server requires before it will create a session. /agentcast:deploy generates and stores it.",
+      "sensitive": true
     },
     "passphrase": {
       "type": "string",

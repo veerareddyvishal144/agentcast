@@ -15,7 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { sampleEvents, sampleMeta } from "@/lib/sample-session";
 import type { StoredEvent } from "@/lib/types";
 
-const INSTALL = "curl -fsSL https://agentcast.agentcast.workers.dev/install.sh | sh";
+const INSTALL = "/plugin marketplace add <you>/agentcast\n/plugin install agentcast@agentcast\n/agentcast:deploy";
 
 export function LandingApp() {
   return (
@@ -52,15 +52,15 @@ function Hero() {
   return (
     <section className="relative z-10 mx-auto grid max-w-6xl items-center gap-12 px-5 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
       <div>
-        <Badge variant="outline" className="mb-5 gap-1.5 rounded-full px-3 py-1 font-mono text-[11px]"><span className="size-1.5 animate-pulse-dot rounded-full bg-live" /> Works with Claude Code today</Badge>
+        <Badge variant="outline" className="mb-5 gap-1.5 rounded-full px-3 py-1 font-mono text-[11px]"><span className="size-1.5 animate-pulse-dot rounded-full bg-live" /> Runs in your own Cloudflare account</Badge>
         <h1 className="text-balance text-5xl font-semibold tracking-[-0.03em] sm:text-6xl">
           Watch a coding agent work. <span className="text-gradient">Live, from a link.</span>
         </h1>
         <p className="mt-6 max-w-xl text-pretty text-lg text-muted-foreground">
-          agentcast streams your Claude Code session to a page anyone can open: prompts, replies, tool calls, diffs and results as they happen. When the session ends, the link becomes a replay.
+          agentcast streams your Claude Code session to a page anyone can open: prompts, replies, tool calls, diffs and results as they happen. When the session ends, the link becomes a replay. The server is yours: one command deploys it to your own Cloudflare account, free.
         </p>
         <div id="install" className="mt-8 scroll-mt-24"><InstallBox /></div>
-        <p className="mt-3 text-xs text-muted-foreground">One command, Node 18+. Nothing to sign up for. Remove it just as easily with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">--uninstall</code>. Prefer plugins? agentcast also ships as a Claude Code plugin with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">/agentcast:link</code>, <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:title</code>, <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:pause</code> and <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">:end</code> commands.</p>
+        <p className="mt-3 text-xs text-muted-foreground">Three commands inside Claude Code. The third opens a Cloudflare login if you need one, creates the server in your account and points the plugin at it. Remove everything later with <code className="rounded border bg-muted/60 px-1 py-0.5 font-mono">/agentcast:undeploy</code>.</p>
       </div>
       <DemoPlayer />
     </section>
@@ -73,9 +73,9 @@ function InstallBox() {
     try { await navigator.clipboard.writeText(INSTALL); setCopied(true); toast.success("Install command copied"); setTimeout(() => setCopied(false), 1500); } catch { toast.error("Could not copy"); }
   };
   return (
-    <div className="glass flex items-center gap-2 rounded-xl border p-1.5 pl-4 shadow-lg shadow-black/10">
-      <Terminal className="size-4 shrink-0 text-muted-foreground" />
-      <code className="min-w-0 flex-1 truncate font-mono text-[13px]">{INSTALL}</code>
+    <div className="glass flex items-start gap-3 rounded-xl border p-3 pl-4 shadow-lg shadow-black/10">
+      <Terminal className="mt-1 size-4 shrink-0 text-muted-foreground" />
+      <pre className="min-w-0 flex-1 font-mono text-[13px] leading-7 whitespace-pre">{INSTALL}</pre>
       <Button size="sm" onClick={copy} className="shrink-0 gap-1.5">{copied ? <Check /> : <Copy />}{copied ? "Copied" : "Copy"}</Button>
     </div>
   );
@@ -130,13 +130,13 @@ function DemoPlayer() {
 
 function HowItWorks() {
   const steps = [
-    { n: "01", title: "Install the hook", body: "Run the one-liner. It downloads a small Node script into ~/.agentcast and registers it as a Claude Code hook, globally or for one project." },
-    { n: "02", title: "Start a session", body: "Open Claude Code as usual. The share link appears as a system message the moment the session starts." },
+    { n: "01", title: "Install and deploy", body: "Install the plugin, then run /agentcast:deploy. It logs you into Cloudflare if needed, creates the Worker, index and bucket in your account, and points the plugin at them." },
+    { n: "02", title: "Start a session", body: "Open Claude Code as usual. The share link appears as a system message the moment the session starts, served from your own Worker." },
     { n: "03", title: "Share the link", body: "Anyone with the link watches live. Once the session ends it becomes a replay with a scrubber, step controls and speed." },
   ];
   return (
     <section id="how" className="relative z-10 mx-auto max-w-6xl scroll-mt-20 px-5 py-16">
-      <h2 className="text-3xl font-semibold tracking-tight">Three steps, no accounts</h2>
+      <h2 className="text-3xl font-semibold tracking-tight">Three steps, your account</h2>
       <div className="mt-8 grid gap-4 md:grid-cols-3">
         {steps.map((s) => (
           <Card key={s.n} className="relative overflow-hidden">
@@ -185,7 +185,7 @@ function Privacy() {
         <CardContent className="grid gap-8 p-8 md:grid-cols-2">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">Privacy defaults you do not have to configure</h2>
-            <p className="mt-3 text-pretty text-muted-foreground">The agent's private thinking is never read from the transcript. Subagent chatter and injected system reminders are dropped. Only your project folder name is sent, never the full path.</p>
+            <p className="mt-3 text-pretty text-muted-foreground">Everything streams to a Worker in your own Cloudflare account; nobody else operates it. The agent's private thinking is never read from the transcript. Subagent chatter and injected system reminders are dropped. Only your project folder name is sent, never the full path.</p>
           </div>
           <ul className="space-y-2 font-mono text-[13px]">
             <li className="flex items-center gap-3"><Kbd>AGENTCAST_PASSPHRASE</Kbd><span className="text-muted-foreground">require a passphrase to view</span></li>
@@ -202,7 +202,7 @@ function Footer() {
   return (
     <footer className="relative z-10 mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-10 text-xs text-muted-foreground sm:flex-row">
       <Brand />
-      <p>Runs on Cloudflare Workers, Durable Objects and Workers AI. Free to use while in preview.</p>
+      <p>Self-hosted on Cloudflare Workers, Durable Objects, Vectorize and R2, in your account. Free plan is enough.</p>
     </footer>
   );
 }

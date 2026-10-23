@@ -9,7 +9,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
   build: {
-    outDir: "../public",
+    outDir: "../plugin/server/public",
     emptyOutDir: true,
     rollupOptions: {
       input: {

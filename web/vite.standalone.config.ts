@@ -10,7 +10,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), viteSingleFile()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
   build: {
-    outDir: "../public",
+    outDir: "../plugin/server/public",
     emptyOutDir: false,
     assetsInlineLimit: 100_000_000,
     cssCodeSplit: false,
