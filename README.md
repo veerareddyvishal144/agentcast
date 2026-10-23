@@ -59,7 +59,7 @@ Prerequisites: Claude Code and Node 18+. A Cloudflare account is created during 
 
 `/agentcast:deploy` runs wrangler from the plugin's bundled server directory: it logs you into Cloudflare in the browser if needed, creates the Vectorize index and R2 bucket (skipping either if your account cannot have it), deploys the Worker to `https://agentcast.<your-subdomain>.workers.dev`, generates a private **create token** and stores it as a Worker secret, and writes `server_url` and `create_token` into the plugin settings. Re-run it any time to upgrade; data is kept. `/agentcast:undeploy` removes the Worker (add `--delete-data` for the index and bucket).
 
-Until a server is configured the hook prints one reminder per session and streams nothing.
+Until a server is configured the hook prints one reminder per session and streams nothing. Run the deploy **after** installing: installing or reinstalling the plugin resets its settings block, so a deploy done earlier would need to be re-run (it is idempotent).
 
 Plugin settings: `server_url`, `create_token` (both set by deploy), `passphrase`, `ai_summary`, `enabled`, `retention` (`24h`, `7d`, `30d`, or `forever`).
 
