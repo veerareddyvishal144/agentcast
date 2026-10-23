@@ -15,7 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { sampleEvents, sampleMeta } from "@/lib/sample-session";
 import type { StoredEvent } from "@/lib/types";
 
-const INSTALL = "/plugin marketplace add <you>/agentcast\n/plugin install agentcast@agentcast\n/agentcast:deploy";
+const INSTALL = "/plugin marketplace add veerareddyvishal144/agentcast\n/plugin install agentcast@agentcast\n/agentcast:deploy";
 
 export function LandingApp() {
   return (
@@ -202,7 +202,7 @@ function Footer() {
   return (
     <footer className="relative z-10 mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-5 py-10 text-xs text-muted-foreground sm:flex-row">
       <Brand />
-      <p>Self-hosted on Cloudflare Workers, Durable Objects, Vectorize and R2, in your account. Free plan is enough.</p>
+      <p>Self-hosted on Cloudflare Workers, Durable Objects, Vectorize and R2, in your account. Free plan is enough. <a className="underline underline-offset-2 hover:text-foreground" href="https://github.com/veerareddyvishal144/agentcast">Source on GitHub</a>.</p>
     </footer>
   );
 }

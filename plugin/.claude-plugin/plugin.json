@@ -6,7 +6,7 @@
   "author": {
     "name": "Vishal Veera Reddy"
   },
-  "homepage": "https://agentcast.agentcast.workers.dev",
+  "homepage": "https://github.com/veerareddyvishal144/agentcast",
   "keywords": [
     "share",
     "stream",
@@ -48,5 +48,7 @@
       "title": "Link retention",
       "description": "How long share links live: 24h (default), 7d, 30d, or forever. You can also keep or delete individual sessions with /agentcast:keep and /agentcast:delete."
     }
-  }
+  },
+  "repository": "https://github.com/veerareddyvishal144/agentcast",
+  "license": "MIT"
 }

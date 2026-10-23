@@ -1,5 +1,8 @@
 # agentcast
 
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/veerareddyvishal144/agentcast/tree/main/plugin/server)
+
+
 Share a live, link-viewable stream of a Claude Code session: prompts, replies, tool calls, diffs and results, as they happen. When the session ends the link becomes a replay with a timeline scrubber. Links expire after 24 hours by default (see [Link expiration](#link-expiration)).
 
 **Self-hosted by design.** There is no shared agentcast service. Each user deploys the server into their own Cloudflare account with one command, and their sessions never leave it. The free plan is enough for personal use. Under the hood: one Worker, one Durable Object per session, Workers AI for titles and questions, Vectorize for search, R2 for kept sessions, static assets for the viewer.
@@ -49,7 +52,7 @@ Dark theme by default with a light toggle, Geist font self-hosted, no runtime CS
 Prerequisites: Claude Code and Node 18+. A Cloudflare account is created during the deploy step if you do not have one (free).
 
 ```
-/plugin marketplace add <github-user>/agentcast     # until the repo is public: /plugin marketplace add /path/to/agentcast
+/plugin marketplace add veerareddyvishal144/agentcast
 /plugin install agentcast@agentcast
 /agentcast:deploy
 ```
@@ -63,6 +66,8 @@ Plugin settings: `server_url`, `create_token` (both set by deploy), `passphrase`
 Slash commands: `/agentcast:link`, `/agentcast:status`, `/agentcast:title <name>`, `/agentcast:pause`, `/agentcast:resume`, `/agentcast:end`, `/agentcast:keep`, `/agentcast:unkeep`, `/agentcast:delete`, `/agentcast:list`, `/agentcast:restore`, `/agentcast:deploy`, `/agentcast:undeploy`, `/agentcast:setup`. The bundled skill also lets you just ask Claude to "share this session" or "rename the shared session".
 
 To try the plugin from a checkout without installing: `claude --plugin-dir ./plugin`.
+
+**Deploy button (no Claude Code needed).** The button above deploys the server from this repo into your own Cloudflare account through the dashboard. Afterwards set the `CREATE_TOKEN` secret on the Worker (Settings → Variables and Secrets) to any long random string, then install the hook with the curl command below using that token, or enter the URL and token in the plugin settings.
 
 **Without the plugin system (curl).** Deploy the server first (`npm run deploy` from a checkout, or the plugin's deploy), then install the hook from your own server, passing your create token:
 
@@ -216,4 +221,4 @@ Event kinds: `session_start`, `user`, `assistant_text`, `tool_use`, `tool_result
 
 ## Not yet built
 
-Accounts (needs an identity provider decision), comments, approval mode, inactivity auto-end for crashed sessions, adapters for Codex and Cursor, custom domain, GitHub publication of the marketplace, a Deploy-to-Cloudflare button for non-Claude users.
+Accounts (needs an identity provider decision), comments, approval mode, inactivity auto-end for crashed sessions, adapters for Codex and Cursor, custom domain, hosted marketplace listing beyond this repo.
